@@ -50,6 +50,9 @@
         $indexes = 1;
     @endphp
     @foreach ($usagesByDusun as $dusun => $usagesGroup)
+        @php
+            $subtotal = 0;
+        @endphp
         @if ($indexes > 1)
             <div class="break"></div>
         @endif
@@ -143,8 +146,17 @@
                         <td align="center">{{ $usage->status }}</td>
                         <td align="right"><b>{{ number_format($total, 2, ',', '.') }}</b></td>
                     </tr>
+                @php
+                    $subtotal += $total;
+                @endphp
                 @endforeach
             </tbody>
+            <tfoot>
+                <tr>
+                    <td colspan="8" align="right"><b>Total</b></td>
+                    <td align="right"><b>{{ number_format($subtotal, 2, ',', '.') }}</b></td>
+                </tr>
+            </tfoot>
         </table>
 
         @php
