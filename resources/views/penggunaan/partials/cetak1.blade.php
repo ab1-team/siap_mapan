@@ -52,6 +52,7 @@
     @foreach ($usagesByDusun as $dusun => $usagesGroup)
         @php
             $subtotal = 0;
+            $totalPemakaian = 0;
         @endphp
         @if ($indexes > 1)
             <div class="break"></div>
@@ -149,12 +150,15 @@
                     </tr>
                     @php
                         $subtotal += $total;
+                        $totalPemakaian += $usage->jumlah;
                     @endphp
                 @endforeach
             </tbody>
             <tfoot>
                 <tr>
-                    <td colspan="8" align="center"><b>Total</b></td>
+                    <td colspan="6" align="center"><b>Total</b></td>
+                    <td align="center"><b>{{ $totalPemakaian }}</b></td>
+                    <td align="center"><b></b></td>
                     <td align="right"><b>{{ number_format($subtotal, 2, ',', '.') }}</b></td>
                 </tr>
             </tfoot>
