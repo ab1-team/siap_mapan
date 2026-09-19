@@ -170,14 +170,15 @@
                     <td style="padding: 0; vertical-align: middle;">
                         <table style="width: 100%; border-collapse: collapse; border: none; font-size: 12px;">
                             <tr>
-                                <td style="border: none; padding: 2px 4px;">Paid</td>
-                                <td style="border: none; padding: 2px 4px; width: 4px;">:</td>
+                                <td style="border: none; padding: 2px 4px; width: 50%;">Paid</td>
+                                <td style="border: none; padding: 2px 4px; width: 5px;">:</td>
                                 <td style="border: none; padding: 2px 4px; text-align: left;">
                                     <b>{{ $totalPaid }}</b></td>
                             </tr>
                             <tr>
-                                <td style="border: none; padding: 2px 4px; border-top: 1px solid #000;">Unpaid</td>
-                                <td style="border: none; padding: 2px 4px; border-top: 1px solid #000; width: 4px;">:
+                                <td style="border: none; padding: 2px 4px; border-top: 1px solid #000; width: 50%;">
+                                    Unpaid</td>
+                                <td style="border: none; padding: 2px 4px; border-top: 1px solid #000; width: 5px;">:
                                 </td>
                                 <td
                                     style="border: none; padding: 2px 4px; border-top: 1px solid #000; text-align: left;">
