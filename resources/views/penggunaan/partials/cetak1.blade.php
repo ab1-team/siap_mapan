@@ -53,6 +53,8 @@
         @php
             $subtotal = 0;
             $totalPemakaian = 0;
+            $totalPaid = 0;
+            $totalUnpaid = 0;
         @endphp
         @if ($indexes > 1)
             <div class="break"></div>
@@ -135,6 +137,13 @@
 
                         $abodemen = $trx_settings->abodemen ?? 0;
                         $total = $usage->nominal + $abodemen + $dendaPemakaianLalu;
+
+                        // Hitung jumlah status Paid dan Unpaid
+                        if (strtoupper($usage->status) == 'PAID') {
+                            $totalPaid++;
+                        } elseif (strtoupper($usage->status) == 'UNPAID') {
+                            $totalUnpaid++;
+                        }
                     @endphp
                     <tr>
                         <td align="center">{{ $i + 1 }}</td>
@@ -158,7 +167,24 @@
                 <tr>
                     <td colspan="6" align="center"><b>Total</b></td>
                     <td align="center"><b>{{ $totalPemakaian }}</b></td>
-                    <td align="center"><b></b></td>
+                    <td style="padding: 0; vertical-align: middle;">
+                        <table style="width: 100%; border-collapse: collapse; border: none; font-size: 12px;">
+                            <tr>
+                                <td style="border: none; padding: 2px 4px;">Paid</td>
+                                <td style="border: none; padding: 2px 4px; width: 5px;">:</td>
+                                <td style="border: none; padding: 2px 4px; text-align: right;">
+                                    <b>{{ $totalPaid }}</b></td>
+                            </tr>
+                            <tr>
+                                <td style="border: none; padding: 2px 4px; border-top: 1px solid #000;">Unpaid</td>
+                                <td style="border: none; padding: 2px 4px; border-top: 1px solid #000; width: 5px;">:
+                                </td>
+                                <td
+                                    style="border: none; padding: 2px 4px; border-top: 1px solid #000; text-align: right;">
+                                    <b>{{ $totalUnpaid }}</b></td>
+                            </tr>
+                        </table>
+                    </td>
                     <td align="right"><b>{{ number_format($subtotal, 2, ',', '.') }}</b></td>
                 </tr>
             </tfoot>
