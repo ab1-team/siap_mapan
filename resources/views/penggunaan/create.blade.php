@@ -528,10 +528,29 @@
 
                             $('#staticBackdrop').modal('hide');
                             if (dataTable) dataTable.ajax.reload();
+                        } else {
+                            Swal.fire({
+                                title: 'Gagal Menyimpan',
+                                text: result.msg || 'Terjadi kesalahan yang tidak diketahui.',
+                                icon: 'error',
+                            });
                         }
                     },
-                    error: function() {
-                        alert('Terjadi kesalahan saat menyimpan');
+                    error: function(xhr) {
+                        // Tampilkan pesan error dari server (jika ada) atau fallback
+                        var msg = 'Terjadi kesalahan saat menyimpan.';
+                        try {
+                            var res = xhr.responseJSON;
+                            if (res && res.msg) {
+                                msg = res.msg;
+                            }
+                        } catch (e) {}
+
+                        Swal.fire({
+                            title: 'Gagal Menyimpan',
+                            text: msg,
+                            icon: 'error',
+                        });
                     }
                 });
             });

@@ -231,55 +231,109 @@ class UsageController extends Controller
 
     public function store(Request $request)
     {
-        $data = $request->only('data')['data'];
-        $data['jumlah'] = $data['jumlah'] ?: 0;
+        try {
+            $data = $request->only('data')['data'];
+            $data['jumlah'] = $data['jumlah'] ?: 0;
 
-        $installation = Installations::where([
-            ['business_id', Session::get('business_id')],
-            ['id', $data['id']],
-        ])->with('package', 'customer')->first();
-        $setting = Settings::where('business_id', Session::get('business_id'))->first();
+            // Validasi ringan sebelum proses
+            $validator = Validator::make($data, [
+                'id'            => 'required',
+                'tgl_pemakaian' => 'required',
+                'customer'      => 'required',
+                'awal'          => 'required|numeric',
+                'akhir'         => 'required|numeric',
+                'toleransi'     => 'required',
+                'id_cater'      => 'required',
+            ]);
 
-        $result = [];
-        $block = json_decode($setting->block, true);
-        $harga = json_decode($installation->package->harga, true);
-        foreach ($block as $index => $item) {
-            preg_match_all('/\d+/', $item['jarak'], $matches);
-            $start = (int) $matches[0][0];
-            $end = (isset($matches[0][1])) ? $matches[0][1] : 200;
-
-            for ($i = $start; $i <= $end; $i++) {
-                $result[$i] = $index;
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'msg' => 'Validasi gagal: ' . implode(', ', $validator->errors()->all()),
+                ], Response::HTTP_UNPROCESSABLE_ENTITY);
             }
+
+            $installation = Installations::where([
+                ['business_id', Session::get('business_id')],
+                ['id', $data['id']],
+            ])->with('package', 'customer')->first();
+
+            if (!$installation) {
+                return response()->json([
+                    'success' => false,
+                    'msg' => 'Instalasi tidak ditemukan. Pastikan data installation valid.',
+                ], Response::HTTP_NOT_FOUND);
+            }
+
+            $setting = Settings::where('business_id', Session::get('business_id'))->first();
+            if (!$setting) {
+                return response()->json([
+                    'success' => false,
+                    'msg' => 'Pengaturan bisnis belum tersedia. Hubungi administrator.',
+                ], Response::HTTP_UNPROCESSABLE_ENTITY);
+            }
+
+            $result = [];
+            $block = json_decode($setting->block, true);
+            $harga = json_decode($installation->package->harga ?? '', true);
+
+            if (!is_array($block)) {
+                return response()->json([
+                    'success' => false,
+                    'msg' => 'Konfigurasi block harga pada pengaturan bisnis tidak valid.',
+                ], Response::HTTP_UNPROCESSABLE_ENTITY);
+            }
+
+            foreach ($block as $index => $item) {
+                preg_match_all('/\d+/', $item['jarak'], $matches);
+                $start = (int) $matches[0][0];
+                $end = (isset($matches[0][1])) ? $matches[0][1] : 200;
+
+                for ($i = $start; $i <= $end; $i++) {
+                    $result[$i] = $index;
+                }
+            }
+
+            $tglPakai = Tanggal::tglNasional($data['tgl_pemakaian']);
+            $index_harga = (isset($result[$data['jumlah']])) ? $result[$data['jumlah']] : end($result);
+
+            // Cek apakah paket memiliki harga (gratis) — decode null/string kosong = paket gratis (misal: kelas musola)
+            $isGratis = empty($harga) || !is_array($harga) || !isset($harga[$index_harga]) || (float) $harga[$index_harga] <= 0;
+
+            $tglAkhir = date('Y-m', strtotime('+1 month', strtotime($tglPakai))) . '-' . str_pad($data['toleransi'], 2, '0', STR_PAD_LEFT);
+
+            $insert = [
+                'business_id' => Session::get('business_id'),
+                'tgl_pemakaian' => Tanggal::tglNasional($data['tgl_pemakaian']),
+                'customer' => $data['customer'],
+                'awal' => $data['awal'],
+                'akhir' => $data['akhir'],
+                'jumlah' => $data['akhir'] - $data['awal'],
+                'id_instalasi' => $data['id'],
+                'kode_instalasi' => $installation->kode_instalasi,
+                'tgl_akhir' => $tglAkhir,
+                'nominal' => $harga[$index_harga] * ($data['akhir'] - $data['awal']),
+                'cater' => $data['id_cater'],
+                'user_id' => auth()->user()->id,
+                // Jika paket gratis (harga kosong/0), status langsung PAID
+                'status' => $isGratis ? 'PAID' : 'UNPAID',
+            ];
+
+            // Simpan data
+            $usage = Usage::create($insert);
+
+            return response()->json([
+                'success' => true,
+                'msg' => 'Input Pemakain Berhasil ',
+                'pemakaian' => $usage,
+            ]);
+        } catch (\Throwable $e) {
+            // Tangani error tak terduga (DB, JSON, dll) agar client mendapat pesan jelas
+            return response()->json([
+                'success' => false,
+                'msg' => 'Terjadi kesalahan saat menyimpan pemakaian: ' . $e->getMessage(),
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
-
-        $tglPakai = Tanggal::tglNasional($data['tgl_pemakaian']);
-        $index_harga = (isset($result[$data['jumlah']])) ? $result[$data['jumlah']] : end($result);
-        $tglAkhir = date('Y-m', strtotime('+1 month', strtotime($tglPakai))) . '-' . str_pad($data['toleransi'], 2, '0', STR_PAD_LEFT);
-
-        $insert = [
-            'business_id' => Session::get('business_id'),
-            'tgl_pemakaian' => Tanggal::tglNasional($data['tgl_pemakaian']),
-            'customer' => $data['customer'],
-            'awal' => $data['awal'],
-            'akhir' => $data['akhir'],
-            'jumlah' => $data['akhir'] - $data['awal'],
-            'id_instalasi' => $data['id'],
-            'kode_instalasi' => $installation->kode_instalasi,
-            'tgl_akhir' => $tglAkhir,
-            'nominal' => $harga[$index_harga] * ($data['akhir'] - $data['awal']),
-            'cater' => $data['id_cater'],
-            'user_id' => auth()->user()->id,
-        ];
-
-        // Simpan data
-        $usage = Usage::create($insert);
-
-        return response()->json([
-            'success' => true,
-            'msg' => 'Input Pemakain Berhasil ',
-            'pemakaian' => $usage,
-        ]);
     }
 
     public function storeSampah(Request $request)
