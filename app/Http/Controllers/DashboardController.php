@@ -10,8 +10,9 @@ use App\Models\Usage;
 use App\Models\User;
 use App\Utils\Keuangan;
 use App\Utils\Tanggal;
-use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Session;
 use Illuminate\Database\Eloquent\Builder;
 
@@ -19,57 +20,62 @@ class DashboardController extends Controller
 {
     public function index()
     {
-        $keuangan = new Keuangan;
+        $keuangan   = new Keuangan;
+        $businessId = Session::get('business_id');
+        $today      = date('Y-m-d');
 
-        $Installation = Installations::where('business_id', Session::get('business_id'))->count();
-        $Usages = Installations::where('business_id', Session::get('business_id'))->where('status', 'A')->with([
-            'customer',
-            'package',
-            'oneUsage' => function ($query) {
-                $query->where('tgl_akhir', '<=', date('Y-m-d'));
-            }
-        ])->get();
-        $Tagihan = Usage::where('business_id', Session::get('business_id'))->where([
-            ['status', 'UNPAID'],
-            ['tgl_akhir', '<', date('Y-m-d')]
-        ])->count();
+        // ---- Semua angka di sini sekarang adalah COUNT langsung di SQL,
+        // ---- tanpa eager-load relasi yang tidak ditampilkan di view.
+        $Installation = Installations::where('business_id', $businessId)->count();
 
-        $Tunggakan = Installations::where('business_id', Session::get('business_id'))->where('status', 'A')
-            ->whereHas('usage', function (Builder  $query) {
-                $query->where([
-                    ['status', 'UNPAID'],
-                    ['tgl_akhir', '<=', date('Y-m-d')]
-                ]);
-            }, '>=', '3')->count();
+        // UsageCount = jumlah instalasi aktif yang punya usage dengan tgl_akhir <= hari ini.
+        // Pakai EXISTS (subquery) -> jauh lebih cepat dari load semua + get.
+        $UsageCount = Installations::where('business_id', $businessId)
+            ->where('status', 'A')
+            ->whereExists(function ($q) use ($today) {
+                $q->select(DB::raw(1))
+                  ->from('usages')
+                  ->whereColumn('usages.id_instalasi', 'installations.id')
+                  ->where('tgl_akhir', '<=', $today);
+            })
+            ->count();
 
-        $UsageCount = 0;
-        foreach ($Usages as $usage) {
-            if ($usage->one_usage != null) {
-                $UsageCount += 1;
-            }
-        }
+        $Tagihan = Usage::where('business_id', $businessId)
+            ->where('status', 'UNPAID')
+            ->where('tgl_akhir', '<', $today)
+            ->count();
+
+        $Tunggakan = Installations::where('business_id', $businessId)
+            ->where('status', 'A')
+            ->whereHas('usage', function (Builder $query) use ($today) {
+                $query->where('status', 'UNPAID')
+                      ->where('tgl_akhir', '<=', $today);
+            }, '>=', 3)
+            ->count();
 
         $bulan = intval(date('m'));
-        $chart = $this->chart();
+        $chart = $this->chart(); // sudah di-cache 1 jam
 
         $pendapatan = $chart['pendapatan'];
-        $beban = $chart['beban'];
-        $surplus = $chart['surplus'];
+        $beban      = $chart['beban'];
+        $surplus    = $chart['surplus'];
 
         $pros_pendapatan = $keuangan->ProsSaldo($pendapatan[$bulan - 1], $pendapatan[$bulan]);
-        $pros_beban = $keuangan->ProsSaldo($beban[$bulan - 1], $beban[$bulan]);
-        $pros_surplus = $keuangan->ProsSaldo($surplus[$bulan - 1], $surplus[$bulan]);
+        $pros_beban      = $keuangan->ProsSaldo($beban[$bulan - 1], $beban[$bulan]);
+        $pros_surplus    = $keuangan->ProsSaldo($surplus[$bulan - 1], $surplus[$bulan]);
 
         $charts = json_encode($chart);
 
-        $today = date('Y-m-d');
-        $year = date('Y');
-        $month = date('m');
+        $title    = 'Dashboard';
+        $api      = env('APP_API', 'http://localhost:8080');
+        $business = Business::where('id', $businessId)->first();
 
-        $title = 'Dashboard';
-        $api = env('APP_API', 'http://localhost:8080');
-        $business = Business::where('id', Session::get('business_id'))->first();
-        return view('welcome')->with(compact('Installation', 'Tunggakan', 'UsageCount', 'Tagihan', 'title', 'charts', 'pendapatan', 'beban', 'surplus', 'pros_pendapatan', 'pros_beban', 'pros_surplus', 'business', 'api'));
+        return view('welcome')->with(compact(
+            'Installation', 'Tunggakan', 'UsageCount', 'Tagihan',
+            'title', 'charts', 'pendapatan', 'beban', 'surplus',
+            'pros_pendapatan', 'pros_beban', 'pros_surplus',
+            'business', 'api'
+        ));
     }
 
     public function usagesDasboard(Request $request)
@@ -151,25 +157,26 @@ class DashboardController extends Controller
 
     public function tunggakan()
     {
+        $today = date('Y-m-d');
+
+        // Pakai subquery agregat untuk jumlah_tunggakan -> 1 query tambahan,
+        // tidak load semua baris Usage.
+        $sub = DB::table('usages')
+            ->select('id_instalasi', DB::raw('COUNT(*) AS jml'))
+            ->where('status', 'UNPAID')
+            ->whereDate('tgl_akhir', '<=', $today)
+            ->groupBy('id_instalasi');
+
         $tunggakan = Installations::where('business_id', Session::get('business_id'))
             ->where('status', 'A')
-            ->whereHas('usage', function (Builder $query) {
+            ->whereHas('usage', function (Builder $query) use ($today) {
                 $query->where('status', 'UNPAID')
-                    ->whereDate('tgl_akhir', '<=', date('Y-m-d'));
+                    ->whereDate('tgl_akhir', '<=', $today);
             })
-            ->with([
-                'customer',
-                'package',
-                'usage' => function ($query) {
-                    $query->where('status', 'UNPAID')
-                        ->whereDate('tgl_akhir', '<=', date('Y-m-d'));
-                }
-            ])
+            ->with(['customer', 'package'])
+            ->leftJoinSub($sub, 't', fn ($j) => $j->on('t.id_instalasi', '=', 'installations.id'))
+            ->addSelect('installations.*', 't.jml as jumlah_tunggakan')
             ->get();
-
-        $tunggakan->each(function ($item) {
-            $item->jumlah_tunggakan = $item->usage->count();
-        });
 
         return response()->json([
             'tunggakan' => $tunggakan
@@ -409,67 +416,75 @@ class DashboardController extends Controller
 
     private function chart()
     {
-        $accounts = Account::where('business_id', Session::get('business_id'))->where(function ($query) {
-            $query->where('lev1', '4')->orWhere('lev1', '5');
-        })->with([
-            'amount' => function ($query) {
-                $query->where('tahun', date('Y'))->where('bulan', '<=', date('m'));
+        $businessId = Session::get('business_id');
+        $tahun      = (int) date('Y');
+        $bulanNow   = (int) date('m');
+
+        $cacheKey = "dashboard.chart.{$businessId}.{$tahun}.{$bulanNow}";
+
+        return Cache::remember($cacheKey, now()->addHour(), function () use ($businessId, $tahun, $bulanNow) {
+
+            // Agregasi langsung di MySQL -> tidak load semua baris Amount ke PHP.
+            // CASE jenis_mutasi untuk meniru logika debit/kredit di kode lama.
+            $rows = DB::table('accounts')
+                ->join('amounts', 'amounts.account_id', '=', 'accounts.id')
+                ->where('accounts.business_id', $businessId)
+                ->whereIn('accounts.lev1', ['4', '5'])
+                ->where('amounts.tahun', $tahun)
+                ->where('amounts.bulan', '<=', $bulanNow)
+                ->groupBy('accounts.lev1', 'amounts.bulan')
+                ->selectRaw('accounts.lev1 as lev1, amounts.bulan as bulan,
+                    SUM(CASE WHEN accounts.jenis_mutasi = "kredit"
+                             THEN amounts.kredit - amounts.debit
+                             ELSE amounts.debit - amounts.kredit END) as saldo')
+                ->get();
+
+            $bulan = [];
+            for ($i = 0; $i <= $bulanNow; $i++) {
+                $bulan[$i] = ['pendapatan' => 0, 'beban' => 0];
             }
-        ])->get();
 
-        $bulan = [];
-        for ($i = 0; $i <= date('m'); $i++) {
-            $bulan[$i] = [
-                'pendapatan' => 0,
-                'beban' => 0
-            ];
-        }
-
-        foreach ($accounts as $account) {
-            foreach ($account->amount as $amount) {
-                $saldo = $amount->kredit - $amount->debit;
-                if ($account->jenis_mutasi != 'kredit') {
-                    $saldo = $amount->debit - $amount->kredit;
-                }
-
-                if ($account->lev1 == '4') {
-                    $bulan[intval($amount->bulan)]['pendapatan'] += $saldo;
+            foreach ($rows as $r) {
+                $b = (int) $r->bulan;
+                if (!isset($bulan[$b])) continue;
+                if ((string) $r->lev1 === '4') {
+                    $bulan[$b]['pendapatan'] += (float) $r->saldo;
                 } else {
-                    $bulan[intval($amount->bulan)]['beban'] += $saldo;
+                    $bulan[$b]['beban']      += (float) $r->saldo;
                 }
             }
-        }
 
-        $nama_bulan = [];
-        $pendapatan = [];
-        $beban = [];
-        $surplus = [];
-        foreach ($bulan as $key => $value) {
+            $nama_bulan = [];
+            $pendapatan = [];
+            $beban      = [];
+            $surplus    = [];
 
-            $saldo_pendapatan = 0;
-            $saldo_beban = 0;
-            if ($key > 0) {
-                $saldo_pendapatan = $value['pendapatan'] - $bulan[$key - 1]['pendapatan'];
-                $saldo_beban = $value['beban'] - $bulan[$key - 1]['beban'];
+            foreach ($bulan as $key => $value) {
+                $saldo_pendapatan = 0;
+                $saldo_beban      = 0;
+                if ($key > 0) {
+                    $saldo_pendapatan = $value['pendapatan'] - $bulan[$key - 1]['pendapatan'];
+                    $saldo_beban      = $value['beban']      - $bulan[$key - 1]['beban'];
+                }
+
+                $pendapatan[$key] = $saldo_pendapatan;
+                $beban[$key]      = $saldo_beban;
+                $surplus[$key]    = $saldo_pendapatan - $saldo_beban;
+
+                if ($key === 0) {
+                    $nama_bulan[$key] = 'Awal Tahun';
+                } else {
+                    $tanggal = date('Y-m-d', strtotime($tahun . '-' . $key . '-01'));
+                    $nama_bulan[$key] = Tanggal::namaBulan($tanggal);
+                }
             }
 
-            $pendapatan[$key] = $saldo_pendapatan;
-            $beban[$key] = $saldo_beban;
-            $surplus[$key] = $saldo_pendapatan - $saldo_beban;
-
-            if ($key == 0) {
-                $nama_bulan[$key] = 'Awal Tahun';
-            } else {
-                $tanggal = date('Y-m-d', strtotime(date('Y') . '-' . $key . '-01'));
-                $nama_bulan[$key] = Tanggal::namaBulan($tanggal);
-            }
-        }
-
-        return [
-            'nama_bulan' => $nama_bulan,
-            'pendapatan' => $pendapatan,
-            'beban' => $beban,
-            'surplus' => $surplus
-        ];
+            return [
+                'nama_bulan' => $nama_bulan,
+                'pendapatan' => $pendapatan,
+                'beban'      => $beban,
+                'surplus'    => $surplus,
+            ];
+        });
     }
 }
