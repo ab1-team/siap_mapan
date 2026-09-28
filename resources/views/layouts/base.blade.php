@@ -29,6 +29,8 @@
     <link href="/assets/vendor/fontawesome-free/css/all.min.css" rel="stylesheet" type="text/css">
     <link href="/assets/vendor/bootstrap/css/bootstrap.min.css" rel="stylesheet" type="text/css">
     <link href="/assets/css/ruang-admin-min.css" rel="stylesheet">
+    {{-- Custom sidebar styles (dipindahkan dari inline styles di sidebar.blade.php) --}}
+    <link href="/assets/css/sidebar-custom.css?v={{ time() }}" rel="stylesheet">
 
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jstree/3.2.1/themes/default/style.min.css" />
 
@@ -186,6 +188,8 @@
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.6.0/dist/echarts.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.18.1/moment.min.js"></script>
     <script src="/assets/js/demo/ruang-admin.js"></script>
+    {{-- Sidebar toggle handler (vanilla JS, dipasang setelah ruang-admin agar konsisten) --}}
+    <script src="/assets/js/sidebar-toggle.js?v={{ time() }}"></script>
     {{-- Logout --}}
     <script>
         $(document).on('click', '#logoutButton', function(e) {
