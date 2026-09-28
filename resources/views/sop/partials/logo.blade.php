@@ -2,204 +2,159 @@
     <h7 class="card-title" style="color:rgb(100, 121, 216); font-weight: 800;">UPLOAD LOGO</h7>
     <hr>
 
-    <form action="/pengaturan/sop/logo/{{ $business->id }}" method="post"
-        enctype="multipart/form-data" id="FormLogo">
-        @csrf
-        @method('PUT')
-        <input type="file" name="logo_busines" id="logo_busines" class="d-none"
-            accept="image/png,image/jpg,image/jpeg">
-
-        {{-- Preview logo --}}
-        <div class="row justify-content-center">
-            <div class="col-md-6 text-center">
-                <div class="border rounded p-3 bg-light" style="min-height: 180px;">
-                    @if(Session::get('logo'))
-                        <img src="{{ asset('storage/logo/' . Session::get('logo')) }}" alt="Logo"
-                            id="previewLogo"
-                            style="max-width: 100%; max-height: 150px; object-fit: contain;">
-                    @else
-                        <div id="previewLogo"
-                            class="d-flex align-items-center justify-content-center text-muted"
-                            style="height: 150px;">
-                            <span>Belum ada logo</span>
-                        </div>
-                    @endif
-                </div>
+    {{-- Preview --}}
+    <div class="text-center mb-4">
+        @if(Session::get('logo'))
+            <img src="{{ asset('storage/logo/' . Session::get('logo')) }}?v={{ time() }}"
+                alt="Logo" id="previewLogo"
+                style="max-width: 240px; max-height: 150px; object-fit: contain; border: 1px solid #ddd; padding: 12px; border-radius: 6px; background: #fff;">
+        @else
+            <div id="previewLogo"
+                style="height: 150px; display: flex; align-items: center; justify-content: center; border: 1px dashed #ccc; border-radius: 6px; color: #999; background: #fafafa;">
+                Belum ada logo
             </div>
-        </div>
+        @endif
+    </div>
 
-        {{-- Info file yang dipilih (sebelum simpan) --}}
-        <div id="fileInfo" class="mt-3 text-center" style="display: none;">
-            <small class="text-muted">
-                File dipilih: <strong id="fileName"></strong>
-                (<span id="fileSize"></span>)
-            </small>
-        </div>
+    {{-- Status --}}
+    <div id="logoStatus" class="text-center mb-2" style="display: none;">
+        <small class="text-info"><i class="fa fa-spinner fa-spin"></i> Mengupload...</small>
+    </div>
 
-        {{-- Baris tombol --}}
-        <div class="row mt-4">
-            <div class="col-md-12 d-flex justify-content-end align-items-center">
-                {{-- State 1: belum pilih file -> tampilkan "Edit Logo" saja.
-                    Pakai <label for="logo_busines"> yg terikat ke <input type=file>:
-                    cara PALING reliable untuk buka native file picker di semua
-                    browser (tidak butuh JS). --}}
-                <label for="logo_busines" id="EditLogo" class="btn btn-info mb-0"
-                    style="cursor: pointer; user-select: none;">
-                    <i class="fa fa-edit"></i>&nbsp;Edit Logo
-                </label>
+    {{-- Tombol pilih file --}}
+    <div class="text-center">
+        <input type="file" id="logoInput" accept="image/png,image/jpg,image/jpeg" style="display: none;">
 
-                {{-- State 2: sudah pilih file -> tampilkan Simpan & Batal --}}
-                <div id="logoActions" style="display: none;">
-                    <button type="button" id="BtnSimpanLogo" class="btn btn-dark">
-                        <i class="fa fa-save"></i>&nbsp;Simpan
-                    </button>
-                    <button type="button" id="BtnBatalLogo" class="btn btn-secondary"
-                        style="margin-left: 8px;">
-                        <i class="fa fa-times"></i>&nbsp;Batal
-                    </button>
-                </div>
-            </div>
-        </div>
-    </form>
+        {{-- Tombol trigger file picker - inline onclick, no jQuery needed --}}
+        <button type="button" class="btn btn-info" onclick="document.getElementById('logoInput').click();">
+            <i class="fa fa-edit"></i>&nbsp;Edit Logo
+        </button>
+    </div>
 </div>
 
 <script>
-    // Jalankan setelah DOM & jQuery siap (partial ini bisa di-render
-    // sebelum jQuery dimuat, sehingga perlu ready handler).
-    $(function () {
-        var $fileInput = $('#logo_busines');
-        var $preview = $('#previewLogo');
-        var $fileInfo = $('#fileInfo');
-        var $fileName = $('#fileName');
-        var $fileSize = $('#fileSize');
-        var $btnEdit = $('#EditLogo');
-        var $actions = $('#logoActions');
-        var $btnSimpan = $('#BtnSimpanLogo');
-        var $btnBatal = $('#BtnBatalLogo');
+    // Handler file input: pilih file -> preview -> langsung upload otomatis.
+    // Pakai vanilla JS untuk keandalan maksimal (no jQuery dependency).
+    (function () {
+        var input = document.getElementById('logoInput');
+        var preview = document.getElementById('previewLogo');
+        var status = document.getElementById('logoStatus');
+        var originalSrc = preview && preview.tagName === 'IMG' ? preview.src : '';
 
-        // Snapshot preview awal (untuk rollback saat Batal)
-        var originalIsImg = $preview.is('img');
-        var originalSrc = originalIsImg ? $preview.attr('src') : '';
-
-        function showNoLogo() {
-            var html = '<div id="previewLogo" class="d-flex align-items-center justify-content-center text-muted" style="height: 150px;"><span>Belum ada logo</span></div>';
-            $preview.replaceWith(html);
-            $preview = $('#previewLogo');
+        if (!input) {
+            console.error('[logo] #logoInput tidak ditemukan');
+            return;
         }
 
-        function showImg(src) {
-            var html = '<img src="' + src + '" alt="Logo" id="previewLogo" style="max-width: 100%; max-height: 150px; object-fit: contain;">';
-            $preview.replaceWith(html);
-            $preview = $('#previewLogo');
-        }
-
-        // ---- Klik "Edit Logo" ditangani oleh <label for="logo_busines"> ----
-        // Tidak butuh handler click di sini, native HTML sudah cukup reliable.
-
-        // ---- File dipilih -> preview, jangan upload dulu ----
-        $fileInput.off('change').on('change', function () {
+        input.addEventListener('change', function () {
             var file = this.files && this.files[0];
             if (!file) return;
 
-            // Validasi client (server tetap validasi)
+            // Validasi client
             var allowed = ['image/png', 'image/jpg', 'image/jpeg'];
             if (allowed.indexOf(file.type) === -1) {
-                if (window.Swal) Swal.fire('Gagal!', 'File harus berformat PNG / JPG / JPEG.', 'error');
-                else alert('File harus berformat PNG / JPG / JPEG.');
-                $fileInput.val('');
+                alert('File harus berformat PNG / JPG / JPEG.');
+                input.value = '';
                 return;
             }
             if (file.size > 4 * 1024 * 1024) {
-                if (window.Swal) Swal.fire('Gagal!', 'Ukuran file maksimal 4MB.', 'error');
-                else alert('Ukuran file maksimal 4MB.');
-                $fileInput.val('');
+                alert('Ukuran file maksimal 4MB.');
+                input.value = '';
                 return;
             }
 
-            // Preview
+            // Preview cepat
             var reader = new FileReader();
-            reader.onload = function (ev) {
-                showImg(ev.target.result);
+            reader.onload = function (e) {
+                if (preview && preview.tagName === 'IMG') {
+                    preview.src = e.target.result;
+                } else {
+                    var img = document.createElement('img');
+                    img.id = 'previewLogo';
+                    img.src = e.target.result;
+                    img.alt = 'Logo';
+                    img.style.maxWidth = '240px';
+                    img.style.maxHeight = '150px';
+                    img.style.objectFit = 'contain';
+                    img.style.border = '1px solid #ddd';
+                    img.style.padding = '12px';
+                    img.style.borderRadius = '6px';
+                    img.style.background = '#fff';
+                    preview.parentNode.replaceChild(img, preview);
+                    preview = img;
+                }
             };
             reader.readAsDataURL(file);
 
-            // Tampilkan info & tombol
-            $fileName.text(file.name);
-            $fileSize.text((file.size / 1024).toFixed(1) + ' KB');
-            $fileInfo.show();
-            $btnEdit.hide();
-            $actions.show();
+            // Upload ke server
+            uploadFile(file);
         });
 
-        // ---- Klik Batal -> kembalikan ke kondisi awal ----
-        $btnBatal.off('click').on('click', function () {
-            $fileInput.val('');
-            $fileInfo.hide();
-            $actions.hide();
-            $btnEdit.show();
+        function uploadFile(file) {
+            var form = document.getElementById('FormLogo');
+            var actionUrl = form ? form.action : '/pengaturan/sop/logo/{{ $business->id }}';
 
-            if (originalIsImg && originalSrc) {
-                showImg(originalSrc);
-            } else {
-                showNoLogo();
-            }
-        });
+            // Cari CSRF token dari meta tag (Laravel standard)
+            var csrfMeta = document.querySelector('meta[name="csrf-token"]');
+            var csrfInput = document.querySelector('input[name="_token"]');
+            var csrf = csrfMeta ? csrfMeta.getAttribute('content')
+                : (csrfInput ? csrfInput.value : '');
 
-        // ---- Klik Simpan -> upload ke server ----
-        $btnSimpan.off('click').on('click', function () {
-            if (!$fileInput.get(0).files.length) {
-                if (window.Swal) Swal.fire('Oops!', 'Pilih file logo terlebih dahulu.', 'warning');
-                else alert('Pilih file logo terlebih dahulu.');
-                return;
-            }
+            var fd = new FormData();
+            fd.append('logo_busines', file);
+            fd.append('_token', csrf);
+            fd.append('_method', 'PUT');
 
-            var formData = new FormData($('#FormLogo')[0]);
-            formData.append('_method', 'PUT');
-            $btnSimpan.prop('disabled', true);
-            $btnBatal.prop('disabled', true);
+            status.style.display = 'block';
 
-            $.ajax({
-                url: $('#FormLogo').attr('action'),
-                method: 'POST',
-                data: formData,
-                processData: false,
-                contentType: false,
-                success: function (response) {
-                    $btnSimpan.prop('disabled', false);
-                    $btnBatal.prop('disabled', false);
+            var xhr = new XMLHttpRequest();
+            xhr.open('POST', actionUrl, true);
+            xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+            if (csrf) xhr.setRequestHeader('X-CSRF-TOKEN', csrf);
 
-                    if (response && response.success) {
-                        if (window.Swal) Swal.fire('Berhasil!', response.msg || 'Logo berhasil diperbarui.', 'success');
+            xhr.onload = function () {
+                status.style.display = 'none';
+                input.value = '';
 
-                        // Refresh preview dengan path baru dari server (cache-busting)
-                        var file = $fileInput.get(0).files[0];
-                        var reader = new FileReader();
-                        reader.onload = function (ev) {
-                            var newSrc = ev.target.result;
-                            showImg(newSrc);
-                            // Snapshot ulang untuk Batal berikutnya
-                            originalIsImg = true;
-                            originalSrc = newSrc;
-                        };
-                        reader.readAsDataURL(file);
+                var resp;
+                try { resp = JSON.parse(xhr.responseText); }
+                catch (e) { resp = { success: false, msg: 'Response tidak valid' }; }
 
-                        $fileInput.val('');
-                        $fileInfo.hide();
-                        $actions.hide();
-                        $btnEdit.show();
-                    } else {
-                        var msg = (response && response.msg) ? response.msg : 'Logo gagal diperbarui';
-                        if (window.Swal) Swal.fire('Gagal!', msg, 'error');
-                        else alert(msg);
+                if (xhr.status >= 200 && xhr.status < 400 && resp.success) {
+                    if (window.Swal) {
+                        Swal.fire({
+                            icon: 'success',
+                            title: 'Berhasil!',
+                            text: resp.msg || 'Logo berhasil diperbarui.',
+                            timer: 1200,
+                            showConfirmButton: false
+                        });
                     }
-                },
-                error: function () {
-                    $btnSimpan.prop('disabled', false);
-                    $btnBatal.prop('disabled', false);
-                    if (window.Swal) Swal.fire('Oops!', 'Terjadi kesalahan saat upload.', 'error');
-                    else alert('Terjadi kesalahan saat upload.');
+                    setTimeout(function () { window.location.reload(); }, 1200);
+                } else {
+                    // Rollback preview
+                    if (originalSrc && preview) preview.src = originalSrc;
+                    var msg = resp.msg || ('Upload gagal (HTTP ' + xhr.status + ')');
+                    if (window.Swal) Swal.fire('Gagal!', msg, 'error');
+                    else alert(msg);
                 }
-            });
-        });
-    });
+            };
+
+            xhr.onerror = function () {
+                status.style.display = 'none';
+                input.value = '';
+                if (originalSrc && preview) preview.src = originalSrc;
+                alert('Terjadi kesalahan jaringan saat upload.');
+            };
+
+            xhr.send(fd);
+        }
+    })();
 </script>
+
+{{-- Form hidden untuk action URL & CSRF (selector #FormLogo) --}}
+<form id="FormLogo" action="/pengaturan/sop/logo/{{ $business->id }}" method="POST"
+    enctype="multipart/form-data" style="display: none;">
+    @csrf
+    @method('PUT')
+</form>
