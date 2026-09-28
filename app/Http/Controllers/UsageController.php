@@ -533,6 +533,11 @@ class UsageController extends Controller
             ['business_id', Session::get('business_id')],
         ])->first();
 
+        $akun_piutang = Account::where([
+            ['kode_akun', '1.1.03.01'],
+            ['business_id', Session::get('business_id')],
+        ])->first();
+
         $data = [
             'tahun' => $thn,
             'bulan' => $bln,
@@ -541,6 +546,7 @@ class UsageController extends Controller
             'tgl' => Tanggal::tahun($tgl),
             'sub_judul' => 'Tahun ' . Tanggal::tahun($tgl),
             'cater' => $request->input('cater', null),
+            'akun_piutang' => $akun_piutang,
         ];
 
         $data['bisnis'] = Business::where('id', Session::get('business_id'))->first();
@@ -565,6 +571,9 @@ class UsageController extends Controller
             'installation.village',
             'installation.transaction' => function ($query) use ($rekening_denda) {
                 $query->where('rekening_kredit', $rekening_denda->id);
+            },
+            'transaction' => function ($query) use ($akun_piutang) {
+                $query->where('rekening_debit', '!=', $akun_piutang ? $akun_piutang->id : 0);
             },
             'usersCater',
             'installation.package',

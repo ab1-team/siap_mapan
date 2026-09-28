@@ -53,8 +53,7 @@
         @php
             $subtotal = 0;
             $totalPemakaian = 0;
-            $totalPaid = 0;
-            $totalUnpaid = 0;
+            $totalDibayar = 0;
         @endphp
         @if ($indexes > 1)
             <div class="break"></div>
@@ -112,7 +111,7 @@
                     <th style="text-align: center;">Awal</th>
                     <th style="text-align: center;">Akhir</th>
                     <th style="text-align: center;">Pemakaian</th>
-                    <th style="text-align: center;">Status</th>
+                    <th style="text-align: center;">Dibayar</th>
                     <th style="text-align: center;">Total</th>
                 </tr>
             </thead>
@@ -138,12 +137,23 @@
                         $abodemen = $trx_settings->abodemen ?? 0;
                         $total = $usage->nominal + $abodemen + $dendaPemakaianLalu;
 
-                        // Hitung jumlah status Paid dan Unpaid
-                        if (strtoupper($usage->status) == 'PAID') {
-                            $totalPaid++;
-                        } elseif (strtoupper($usage->status) == 'UNPAID') {
-                            $totalUnpaid++;
+                        // Hitung nominal dibayar dari transaksi jurnal (rekening_debit != akun piutang)
+                        $dibayar = 0;
+                        foreach ($usage->transaction as $trx) {
+                            $dibayar += $trx->total;
                         }
+
+                        // Tentukan status Lunas / Belum
+                        if (strtoupper($usage->status) == 'PAID' || $dibayar >= $total) {
+                            $kodeStatus = 'L';
+                            $isLunas = true;
+                        } else {
+                            $kodeStatus = 'B';
+                            $isLunas = false;
+                        }
+
+                        // Akumulasi total dibayar
+                        $totalDibayar += $dibayar;
                     @endphp
                     <tr>
                         <td align="center">{{ $i + 1 }}</td>
@@ -153,8 +163,10 @@
                         <td align="center">{{ $usage->installation->rt ?? '00' }}</td>
                         <td align="center">{{ $usage->awal }}</td>
                         <td align="center">{{ $usage->akhir }}</td>
-                        <td align="center">{{ $usage->jumlah }}</td>
-                        <td align="center">{{ $usage->status }}</td>
+                        <td align="center">
+                            {{ $usage->jumlah }} - {{ $kodeStatus }}
+                        </td>
+                        <td align="right">{{ number_format($dibayar, 2, ',', '.') }}</td>
                         <td align="right"><b>{{ number_format($total, 2, ',', '.') }}</b></td>
                     </tr>
                     @php
@@ -167,29 +179,15 @@
                 <tr>
                     <td colspan="6" align="center"><b>Total</b></td>
                     <td align="center"><b>{{ $totalPemakaian }}</b></td>
-                    <td style="padding: 0; vertical-align: middle;">
-                        <table style="width: 100%; border-collapse: collapse; border: none; font-size: 12px;">
-                            <tr>
-                                <td style="border: none; padding: 2px 4px; width: 50%;">Paid</td>
-                                <td style="border: none; padding: 2px 4px; width: 5px;">:</td>
-                                <td style="border: none; padding: 2px 4px; text-align: left;">
-                                    <b>{{ $totalPaid }}</b></td>
-                            </tr>
-                            <tr>
-                                <td style="border: none; padding: 2px 4px; border-top: 1px solid #000; width: 50%;">
-                                    Unpaid</td>
-                                <td style="border: none; padding: 2px 4px; border-top: 1px solid #000; width: 5px;">:
-                                </td>
-                                <td
-                                    style="border: none; padding: 2px 4px; border-top: 1px solid #000; text-align: left;">
-                                    <b>{{ $totalUnpaid }}</b></td>
-                            </tr>
-                        </table>
-                    </td>
+                    <td align="right"><b>{{ number_format($totalDibayar, 2, ',', '.') }}</b></td>
                     <td align="right"><b>{{ number_format($subtotal, 2, ',', '.') }}</b></td>
                 </tr>
             </tfoot>
         </table>
+
+        <div style="text-align: right; margin-top: 10px; font-size: 11px;">
+            Dicetak pada {{ \Carbon\Carbon::now()->translatedFormat('d F Y H:i:s') }} WIB
+        </div>
 
         @php
             $indexes++;

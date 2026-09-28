@@ -38,9 +38,8 @@
                 <th width="21%" class="t l b" rowspan="2">Nama</th>
                 <th width="15%" class="t l b" rowspan="2">No. Induk</th>
                 <th width="30%" class="t l b" colspan="3">Tunggakan</th>
-                <th width="10%" class="t l b" rowspan="2">Jumlah Tunggakan</th>
-                <th width="10%" class="t l b" rowspan="2">Dibayar</th>
-                <th width="10%" class="t l b r" rowspan="2">Kategori</th>
+                <th width="15%" class="t l b" rowspan="2">Jumlah Tunggakan</th>
+                <th width="15%" class="t l b r" rowspan="2">Kategori</th>
             </tr>
             <tr style="background: rgb(230, 230, 230); font-weight: bold;">
                 <th width="10%" class="t l b">s/d 3 Bulan Lalu</th>
@@ -70,9 +69,6 @@
                             </td>
                             <td class="t l b" align="right">
                                 {{ number_format($jumlah_tunggakan, 2) }}
-                            </td>
-                            <td class="t l b" align="right">
-                                {{ number_format($jumlah_bayar, 2) }}
                             </td>
                             <td class="t l b r"></td>
                         </tr>
@@ -113,7 +109,7 @@
                             $bulan_kondisi = date('Y-m', strtotime($tgl_kondisi)) . '-01';
                             $bulan_kondisi_lalu = date('Y-m', strtotime('-1 month', strtotime($bulan_kondisi))) . '-01';
                             $bulan_kondisi_lama =
-                                date('Y-m', strtotime('-1 month', strtotime($bulan_kondisi_lalu))) . '-01';
+                                date('Y-m', strtotime('-3 month', strtotime($bulan_kondisi))) . '-01';
 
                             if ($trx->rekening_debit == $akun_piutang->id) {
                                 if ($trx->rekening_kredit == $akun_denda->id) {
@@ -186,9 +182,6 @@
                     <td class="t l b" align="right">
                         {{ number_format($tunggakan, 2) }}
                     </td>
-                    <td class="t l b" align="right">
-                        {{ number_format($bayar, 2) }}
-                    </td>
                     <td class="t l b r" align="center">
                         {{ $status }}
                     </td>
@@ -207,9 +200,6 @@
                 </td>
                 <td class="t l b" align="right">
                     {{ number_format($jumlah_tunggakan, 2) }}
-                </td>
-                <td class="t l b" align="right">
-                    {{ number_format($jumlah_bayar, 2) }}
                 </td>
                 <td class="t l b r"></td>
             </tr>
