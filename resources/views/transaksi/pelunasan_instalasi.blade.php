@@ -181,6 +181,11 @@
 @endsection
 
 @section('script')
+    {{-- BUG #3 FIX: Typeahead scripts (termasuk #PelunasanInstalasi handler)
+         dipindahkan dari base ke partial ini. Hanya di-include di halaman
+         yang punya element target. --}}
+    @include('layouts.partials.typeahead-scripts')
+
     <script>
         //angka 00,000,00
         $("#abodemen").maskMoney({

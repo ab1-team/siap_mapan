@@ -576,10 +576,8 @@ a.sidebar-brand:active {
     body.sidebar-toggled .sidebar .nav-item.active > .nav-link {
         box-shadow: 0 .25rem 1rem 0 rgba(78, 115, 223, .45);
     }
-    /* Sembunyikan text di topbar user (suplai nama user) saat collapse */
-    body.sidebar-toggled.topbar-user-hidden-helper .topbar .NamaUser {
-        display: none !important;
-    }
+    /* BUG #4 FIX: Rule .topbar-user-hidden-helper dihapus (dead code -
+       class ini tidak pernah di-add oleh JS maupun markup). */
 }
 
 /* =========================================================

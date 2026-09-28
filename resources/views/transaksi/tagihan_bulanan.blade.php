@@ -98,6 +98,11 @@
     </div>
 @endsection
 @section('script')
+    {{-- BUG #3 FIX: Typeahead scripts (termasuk #TagihanBulanan handler dan
+         fungsi formTagihanBulanan) dipindahkan dari base ke partial ini.
+         Hanya di-include di halaman yang punya element target. --}}
+    @include('layouts.partials.typeahead-scripts')
+
     <script>
         //hitung total (tagihan bulanan)
         $(document).on('change', '#pembayaran', function() {
