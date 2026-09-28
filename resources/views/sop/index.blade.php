@@ -213,44 +213,9 @@
 
 @section('script')
     <script>
-        $(document).on('click', '#EditLogo', function(e) {
-            e.preventDefault()
-
-            $('#logo_busines').trigger('click')
-        })
-        $(document).on('change', '#logo_busines', function (e) {
-        e.preventDefault()
-
-        var logo = $(this).get(0).files[0]
-        if (logo) {
-            var form = $('#FormLogo')
-            var formData = new FormData(document.querySelector('#FormLogo'));
-            $.ajax({
-                type: form.attr('method'),
-                url: form.attr('action'),
-                data: formData,
-                contentType: false,
-                cache: false,
-                processData: false,
-                success: function (result) {
-                    if (result.success) {
-                        var reader = new FileReader();
-
-                        reader.onload = function () {
-                            $("#previewLogo").attr("src", reader.result);
-                            $(".colored-shadow").css('background-image',
-                                "url(" + reader.result + ")")
-                        }
-
-                        reader.readAsDataURL(logo);
-                        Toastr('success', result.msg)
-                    } else {
-                        Toastr('error', result.msg)
-                    }
-                }
-            })
-        }
-    })
+        // Handler upload logo dipindahkan ke partial `sop.partials.logo`
+        // (alur: pilih file -> preview dulu -> klik Simpan baru upload).
+        // Jangan bind handler di sini supaya tidak terjadi double upload.
     </script>
     <script>
         //pasang baru

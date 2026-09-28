@@ -133,6 +133,10 @@
 </head>
 
 <body id="page-top">
+    <!-- Backdrop untuk sidebar mobile (sibling #wrapper, agar fixed-position
+         benar-benar relatif ke viewport meski parent ada transform) -->
+    <div class="sidebar-mobile-backdrop" id="sidebarMobileBackdrop" aria-hidden="true"></div>
+
     <div id="wrapper">
 
         @include('layouts.sidebar')

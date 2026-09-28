@@ -4,6 +4,10 @@
  * Helper untuk menentukan apakah sebuah menu/link sidebar sedang aktif.
  *
  * Strategi pencocokan:
+ * - Special case untuk menu Dashboard (link '/'):
+ *     Aktif saat URL = '/' (home) atau apapun di bawah '/dashboard/*'.
+ *     Ini mengakomodasi route '/' yang mengarah ke DashboardController@index
+ *     (home) dan beberapa sub-page dashboard (mis. '/dashboard/installations').
  * - Exact match → selalu dicek
  * - Prefix segment match → hanya jika TIDAK ada sibling menu lain
  *   yang path-nya merupakan child dari path ini.
@@ -24,11 +28,30 @@
 if (! function_exists('menuIsActive')) {
     function menuIsActive($link)
     {
-        $currentPath = trim(request()->path(), '/');
-        if ($currentPath === '') return false;
+        $currentPath = trim((string) request()->path(), '/');
 
         $path = trim(parse_url((string) $link, PHP_URL_PATH) ?? '', '/');
-        if ($path === '') return false;
+
+        // 0) Special case: menu Dashboard (link = '/').
+        //    Karena '/' sebagai root tidak punya segment, logika segment-prefix
+        //    di bawah tidak bisa diterapkan. Kita tangani secara eksplisit:
+        //    - root ('/') aktif saat URL persis '/' (home).
+        //    - 'dashboard' segment aktif saat URL apa pun di bawah '/dashboard/*'.
+        if ($path === '' || $path === '/') {
+            if ($currentPath === '') {
+                return true; // URL persis '/'
+            }
+            // Atau ketika berada di sub-page dashboard, mis. '/dashboard/installations'
+            if ($currentPath === 'dashboard' || str_starts_with($currentPath, 'dashboard/')) {
+                return true;
+            }
+            return false;
+        }
+
+        if ($currentPath === '') {
+            // URL di root '/', tapi menu ini BUKAN menu Dashboard -> tidak aktif.
+            return false;
+        }
 
         // 1) Exact match selalu aktif
         if ($currentPath === $path) return true;

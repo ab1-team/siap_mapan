@@ -3,6 +3,7 @@ name: Deploy
 on:
   push:
     branches: [master]
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -15,8 +16,55 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: 22
+          command_timeout: 15m
           script: |
+            set -e
+
+            # 1) Masuk ke direktori aplikasi
             cd /home/enpii/apps/pamsides
+
+            # 2) Amankan dari kegagalan pull karena local changes/conflict di server.
+            #    Stash dulu kalau ada perubahan tracked/untracked, lalu reset ke HEAD origin.
+            if ! git diff --quiet HEAD -- || ! git diff --cached --quiet || \
+               [ -n "$(git status --porcelain)" ]; then
+              echo ">> Ada perubahan lokal di server, di-stash dulu..."
+              git stash push -u -m "auto-stash-before-deploy-$(date +%s)" || true
+            fi
+
+            # 3) Reset ke HEAD origin supaya pasti bersih (server produksi seharusnya
+            #    tidak punya komit lokal yang menyimpang dari origin/master).
+            git fetch origin master
+            git reset --hard origin/master
+
+            # 4) Tarik kode terbaru (untuk berjaga-jaga kalau ada perbedaan)
             git pull origin master
+
+            # 5) Build ulang image PHP kalau Dockerfile berubah
             docker compose up -d --build
-            docker compose exec -T php composer install
+
+            # 6) Install dependency composer (kalau composer.json/lock berubah)
+            docker compose exec -T php composer install --no-interaction --prefer-dist --optimize-autoloader || true
+
+            # 7) WAJIB: bersihkan semua cache Laravel supaya perubahan
+            #    blade/controller/route/config langsung kelihatan.
+            docker compose exec -T php php artisan view:clear
+            docker compose exec -T php php artisan cache:clear
+            docker compose exec -T php php artisan config:clear
+            docker compose exec -T php php artisan route:clear
+
+            # 8) (Opsional) Rebuild cache produksi agar lebih cepat di request berikutnya.
+            #    Aman dilakukan setelah clear.
+            docker compose exec -T php php artisan config:cache || true
+            docker compose exec -T php php artisan route:cache || true
+            docker compose exec -T php php artisan view:cache || true
+
+            # 9) Restart opcache (kalau container PHP pakai opcache)
+            docker compose exec -T php bash -c "php -r 'function_exists(\"opcache_reset\") and opcache_reset();'" || true
+
+            # 10) Tampilkan status akhir biar kelihatan di log GH Actions
+            echo ">> HEAD di server:"
+            git log --oneline -1
+            echo ">> Status container:"
+            docker compose ps
+
+            echo ">> Deploy selesai."

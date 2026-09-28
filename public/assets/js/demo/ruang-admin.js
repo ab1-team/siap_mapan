@@ -2,12 +2,15 @@
     "use strict"; // Start of use strict
 
     // Toggle the side navigation
-    $("#sidebarToggle, #sidebarToggleTop").on('click', function (e) {
-        $("body").toggleClass("sidebar-toggled");
-        $(".sidebar").toggleClass("toggled");
-        if ($(".sidebar").hasClass("toggled")) {
+    // Catatan: handler body.sidebar-toggled / .sidebar-mobile-open sepenuhnya
+    // di-handle oleh script di sidebar.blade.php (responsif untuk desktop & mobile).
+    // Di sini kita hanya memastikan sub-menu collapse tertutup saat toggle
+    // di desktop.
+    $(document).on('click', '#sidebarToggle, #sidebarToggleTop', function (e) {
+        // Hanya relevan untuk desktop; untuk mobile, sidebar.blade.php yang handle
+        if ($(window).width() > 768 && $('body').hasClass('sidebar-toggled')) {
             $('.sidebar .collapse').collapse('hide');
-        };
+        }
     });
 
     // Close any open menu accordions when window is resized below 768px
