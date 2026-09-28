@@ -85,7 +85,7 @@
 
                     <td style="width: 17%; border: none; padding: 2px 4px; line-height: 1.1;">Tgl Akhir Pembayaran</td>
                     <td style="width: 1%; border: none; padding: 2px 4px; line-height: 1.1;">:</td>
-                    <td style="width: 15%; border: none; padding: 2px 4px; line-height: 1.1;">
+                    <td style="width: 17%; border: none; padding: 2px 4px; line-height: 1.1;">
                         <b>{{ $tglAkhirFormatted }}</b>
                     </td>
                 </tr>
@@ -186,7 +186,8 @@
         </table>
 
         <div style="text-align: right; margin-top: 10px; font-size: 11px;">
-            Dicetak pada {{ \Carbon\Carbon::now()->translatedFormat('d F Y H:i:s') }} WIB
+            Dicetak pada {{ \Carbon\Carbon::now()->translatedFormat('d F Y') }}, pukul
+            {{ \Carbon\Carbon::now()->format('H:i:s') }} WIB
         </div>
 
         @php
