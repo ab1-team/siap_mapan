@@ -85,7 +85,7 @@
 
                     <td style="width: 17%; border: none; padding: 2px 4px; line-height: 1.1;">Tgl Akhir Pembayaran</td>
                     <td style="width: 1%; border: none; padding: 2px 4px; line-height: 1.1;">:</td>
-                    <td style="width: 17%; border: none; padding: 2px 4px; line-height: 1.1;">
+                    <td style="width: 16%; border: none; padding: 2px 4px; line-height: 1.1;">
                         <b>{{ $tglAkhirFormatted }}</b>
                     </td>
                 </tr>
