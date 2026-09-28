@@ -196,13 +196,12 @@
         -webkit-border-radius: 50% !important;
         -moz-border-radius: 50% !important;
         overflow: hidden;
-        /* Logo: gradient putih→biru muda supaya kontras di atas bg biru tua */
-        background: linear-gradient(135deg, #ffffff 0%, #dbeafe 100%) !important;
-        box-shadow: 0 .45rem 1.5rem rgba(0, 0, 0, .35),
-            inset 0 0 0 4px rgba(255, 255, 255, .25);
+        /* Logo: gradient biru brand sebagai aksen kontras di atas bg gelap */
+        background: linear-gradient(135deg, #4e73df 0%, #224abe 100%) !important;
+        box-shadow: 0 .45rem 1.15rem rgba(78, 115, 223, .5);
         position: relative;
         text-decoration: none !important;
-        color: #1e40af;
+        color: #ffffff;
         transition: width .2s ease-in-out, height .2s ease-in-out,
             min-width .2s ease-in-out, min-height .2s ease-in-out,
             margin .2s ease-in-out;
@@ -218,12 +217,12 @@
         border-radius: 50% !important;
         -webkit-border-radius: 50% !important;
         display: block;
-        background: linear-gradient(135deg, #ffffff 0%, #dbeafe 100%);
+        background: linear-gradient(135deg, #4e73df 0%, #224abe 100%);
     }
 
     /* Inisial nama usaha (fallback jika logo gagal load) */
     .sidebar-wrapper .sidebar-brand .sidebar-brand-icon-fallback {
-        color: #1e40af;
+        color: #ffffff;
         font-weight: 800;
         font-size: 2.4rem;
         letter-spacing: .02em;
@@ -289,7 +288,7 @@
         color: var(--sb-hover-text) !important;
     }
     .sidebar .nav-item .nav-link:hover i {
-        color: #93c5fd; /* biru muda, kontras dengan dark bg */
+        color: var(--sb-text-strong); /* putih, kontras dengan bg gelap */
     }
 
     /* Indikator panah collapse (rotate saat expanded) */
@@ -441,16 +440,16 @@
 
     /* Parent menu yang punya child aktif (expanded) */
     .sidebar .nav-item .nav-link[aria-expanded="true"] {
-        color: #93c5fd !important;
-        background-color: rgba(96, 165, 250, .12) !important;
+        color: #ffffff !important;
+        background-color: rgba(255, 255, 255, .12) !important;
         font-weight: 600 !important;
         border-radius: .5rem !important;
     }
     .sidebar .nav-item .nav-link[aria-expanded="true"] i {
-        color: #93c5fd !important;
+        color: #ffffff !important;
     }
     .sidebar .nav-item .nav-link[aria-expanded="true"]:hover {
-        background-color: rgba(96, 165, 250, .2) !important;
+        background-color: rgba(255, 255, 255, .18) !important;
     }
 
     /* Hapus <br> bawaan blade */
