@@ -108,6 +108,32 @@
             <div class="col-lg-12">
                 <div class="card mb-4">
                     <div class="card-body">
+                        <div class="alert alert-light" role="alert">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="position-relative mb-3">
+                                        <label for="blokir">Tentukan Tanggal Blokir</label>
+                                        <input type="text" class="form-control date" name="blokir" id="blokir"
+                                            value="{{ date('d/m/Y') }}">
+                                        <small class="text-danger" id="msg_blokir"></small>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="position-relative mb-3">
+                                        <label>Nik</label>
+                                        <input type="text" class="form-control" disabled
+                                            value="{{ $installation->customer->nik ?? '-' }}">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="position-relative mb-3">
+                                        <label>Desa</label>
+                                        <input type="text" class="form-control" disabled
+                                            value="{{ $installation->village->nama ?? '-' }}">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                         <div class="col-12 d-flex justify-content-end">
                             <button id="cetakBrcode" class="btn btn-danger btn-icon-split" target="_blank">
                                 <span class="icon text-white-50 d-none d-lg-block">
@@ -121,10 +147,19 @@
                                 </span>
                                 <span class="text">Cetak</span>
                             </button>
-                            <tr>
-                                <td>&nbsp;&nbsp;</td>
-                            </tr>
-                            <button id="kembali" class="btn btn-light btn-icon-split">
+                            <button class="btn btn-secondary btn-icon-split" type="button"
+                                id="Blokir_Status_B" data-id="{{ $installation->id }}"
+                                style="float: right; margin-left: 10px;">
+                                <span class="icon text-white-50 d-none d-lg-block">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"
+                                        fill="currentColor" class="bi bi-lock-fill" viewBox="0 0 16 16">
+                                        <path
+                                            d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2zm3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z" />
+                                    </svg>
+                                </span>
+                                <span class="text">Blokir</span>
+                            </button>
+                            <button id="kembali" class="btn btn-light btn-icon-split" style="margin-left: 10px;">
                                 <span class="icon text-white-50 d-none d-lg-block">
                                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"
                                         fill="currentColor" class="bi bi-sign-turn-slight-left-fill" viewBox="0 0 16 16">
@@ -151,6 +186,68 @@
         $(document).on('click', '#kembali', function(e) {
             e.preventDefault();
             window.location.href = '/installations?status=A';
+        });
+
+        // Tombol Blokir: ubah status A -> B dengan tanggal blokir
+        $(document).on('click', '#Blokir_Status_B', function(e) {
+            e.preventDefault();
+
+            var cek_id = $(this).attr('data-id');
+            var tglBlokir = $('#blokir').val();
+
+            if (!tglBlokir) {
+                Swal.fire({
+                    title: 'Tanggal blokir wajib diisi',
+                    icon: 'warning',
+                    confirmButtonText: 'OK'
+                });
+                return;
+            }
+
+            Swal.fire({
+                title: "Blokir Instalasi?",
+                text: "Status instalasi akan diubah menjadi BLOKIR.",
+                icon: "warning",
+                showCancelButton: true,
+                confirmButtonText: "Yes, Blokir",
+                cancelButtonText: "Batal",
+                reverseButtons: true
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    $.ajax({
+                        type: 'POST',
+                        url: '/installations/BlokirStatus_B/' + cek_id,
+                        data: {
+                            _token: '{{ csrf_token() }}',
+                            blokir: tglBlokir
+                        },
+                        success: function(response) {
+                            Swal.fire({
+                                title: 'Berhasil!',
+                                text: response.msg,
+                                icon: 'success',
+                                confirmButtonText: 'OK'
+                            }).then((res) => {
+                                if (res.isConfirmed) {
+                                    window.location.href = '/installations?status=B';
+                                }
+                            });
+                        },
+                        error: function(xhr) {
+                            const response = xhr.responseJSON;
+                            const errorMsg = response && response.msg
+                                ? response.msg
+                                : 'Terjadi kesalahan saat memblokir instalasi.';
+                            Swal.fire({
+                                title: 'Error',
+                                text: errorMsg,
+                                icon: 'error',
+                                confirmButtonText: 'OK'
+                            });
+                        }
+                    });
+                }
+            });
         });
 
         $("#total").maskMoney({

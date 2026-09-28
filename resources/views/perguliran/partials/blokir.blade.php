@@ -136,8 +136,22 @@
                             </div>
                         </div>
                         <div class="col-12 d-flex justify-content-end">
-                            <button class="btn btn-warning btn-icon-split" data-id="{{ $installation->id }}" type="submit"
-                                id="Kembali_Status_A" style="float: right; margin-left: 10px;">
+                            <div class="me-auto">
+                                @if (isset($jumlah_tunggakan) && $jumlah_tunggakan > 0)
+                                    <span class="badge badge-danger p-2">
+                                        <i class="bi bi-exclamation-triangle-fill"></i>
+                                        Masih ada {{ $jumlah_tunggakan }} tunggakan. Lunasi dulu sebelum aktifkan kembali.
+                                    </span>
+                                @else
+                                    <span class="badge badge-success p-2">
+                                        <i class="bi bi-check-circle-fill"></i>
+                                        Tidak ada tunggakan. Bisa diaktifkan kembali.
+                                    </span>
+                                @endif
+                            </div>
+                            <button class="btn btn-warning btn-icon-split" data-id="{{ $installation->id }}" type="button"
+                                id="Kembali_Status_A" style="float: right; margin-left: 10px;"
+                                @if (isset($jumlah_tunggakan) && $jumlah_tunggakan > 0) disabled title="Lunasi tunggakan terlebih dahulu" @endif>
                                 <span class="icon text-white-50 d-none d-lg-block">
                                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"
                                         fill="currentColor" class="bi bi-sign-intersection-fill" viewBox="0 0 16 16">
@@ -213,38 +227,62 @@
             var form = $('#Form_status_B');
             var actionUrl = form.attr('action');
 
-            $.ajax({
-                type: 'POST',
-                url: actionUrl,
-                data: form.serialize(),
-                success: function(result) {
-                    if (result.success) {
-                        Swal.fire({
-                            title: result.msg,
-                            icon: "success",
-                            draggable: true
-                        }).then((res) => {
-                            if (res.isConfirmed) {
-                                window.location.href = '/installations/' + result.cabut.id;
-                            }
-                        });
-                    }
-                },
-                error: function(result) {
-                    const response = result.responseJSON;
-
-                    Swal.fire('Error', 'Cek kembali input yang anda masukkan', 'error');
-
-                    if (response && typeof response === 'object') {
-                        $.each(response, function(key, message) {
-                            $('#' + key)
-                                .closest('.input-group.input-group-static')
-                                .addClass('is-invalid');
-
-                            $('#msg_' + key).html(message);
-                        });
-                    }
+            // Konfirmasi sebelum cabut: beri tahu user bahwa status tidak bisa dikembalikan lagi
+            Swal.fire({
+                title: 'Cabut Instalasi?',
+                html: 'Setelah instalasi di-<b>CABUT</b>, status tidak dapat dikembalikan lagi ke status sebelumnya (Aktif/Blokir).<br><br>Pastikan ini adalah keputusan akhir.',
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonText: 'Ya, Cabut Sekarang',
+                cancelButtonText: 'Batal',
+                reverseButtons: true,
+                confirmButtonColor: '#6c757d',
+                cancelButtonColor: '#3085d6'
+            }).then((confirmResult) => {
+                if (!confirmResult.isConfirmed) {
+                    Swal.fire({
+                        title: 'Dibatalkan',
+                        text: 'Instalasi tidak jadi dicabut.',
+                        icon: 'info',
+                        confirmButtonText: 'OK'
+                    });
+                    return;
                 }
+
+                $.ajax({
+                    type: 'POST',
+                    url: actionUrl,
+                    data: form.serialize(),
+                    success: function(result) {
+                        if (result.success) {
+                            Swal.fire({
+                                title: result.msg,
+                                text: 'Status instalasi telah berubah menjadi COPOT dan tidak dapat dikembalikan lagi.',
+                                icon: "success",
+                                draggable: true
+                            }).then((res) => {
+                                if (res.isConfirmed) {
+                                    window.location.href = '/installations/' + result.cabut.id;
+                                }
+                            });
+                        }
+                    },
+                    error: function(result) {
+                        const response = result.responseJSON;
+
+                        Swal.fire('Error', 'Cek kembali input yang anda masukkan', 'error');
+
+                        if (response && typeof response === 'object') {
+                            $.each(response, function(key, message) {
+                                $('#' + key)
+                                    .closest('.input-group.input-group-static')
+                                    .addClass('is-invalid');
+
+                                $('#msg_' + key).html(message);
+                            });
+                        }
+                    }
+                });
             });
         });
         // mengembalikan status B ke A
@@ -280,17 +318,20 @@
                                 if (res.isConfirmed) {
                                     window.location.reload()
                                 } else {
-                                    window.location.href = '/installations/' + result
+                                    window.location.href = '/installations/' + response
                                         .kembaliA.id;
                                 }
                             });
                         },
-                        error: function(response) {
-                            const errorMsg = "Terjadi kesalahan.";
+                        error: function(xhr) {
+                            const response = xhr.responseJSON;
+                            const errorMsg = response && response.msg
+                                ? response.msg
+                                : "Terjadi kesalahan.";
                             Swal.fire({
-                                title: "Error",
+                                title: "Tidak Dapat Diaktifkan",
                                 text: errorMsg,
-                                icon: "error",
+                                icon: "warning",
                                 confirmButtonText: "OK"
                             });
                         }

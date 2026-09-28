@@ -117,6 +117,17 @@
                                 </span>
                                 <span class="text">Kembali</span>
                             </button>
+                            <button type="button" id="HapusPelanggan" data-id="{{ $installation->id }}"
+                                class="btn btn-danger btn-icon-split" style="margin-left: 10px;">
+                                <span class="icon text-white-50 d-none d-lg-block">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"
+                                        fill="currentColor" class="bi bi-trash3-fill" viewBox="0 0 16 16">
+                                        <path
+                                            d="M11 1.5v1h3.5a.5.5 0 0 1 0 1h-.538l-.853 10.66A2 2 0 0 1 11.115 16h-6.23a2 2 0 0 1-1.994-1.84L2.038 3.5H1.5a.5.5 0 0 1 0-1H5v-1A1.5 1.5 0 0 1 6.5 0h3A1.5 1.5 0 0 1 11 1.5Zm-5 0v1h4v-1a.5.5 0 0 0-.5-.5h-3a.5.5 0 0 0-.5.5ZM4.5 5.029l.5 8.5a.5.5 0 1 0 .998-.06l-.5-8.5a.5.5 0 1 0-.998.06Zm6.53-.528a.5.5 0 0 0-.528.47l-.5 8.5a.5.5 0 0 0 .998.058l.5-8.5a.5.5 0 0 0-.47-.528ZM8 4.5a.5.5 0 0 0-.5.5v8.5a.5.5 0 0 0 1 0V5a.5.5 0 0 0-.5-.5Z" />
+                                    </svg>
+                                </span>
+                                <span class="text">Hapus Data Pelanggan</span>
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -129,6 +140,121 @@
         $(document).on('click', '#kembali', function(e) {
             e.preventDefault();
             window.location.href = '/installations?status=C';
+        });
+
+        // Tombol Hapus Data Pelanggan (instalasi + usage + transaksi, TETAP simpan customer)
+        $(document).on('click', '#HapusPelanggan', function(e) {
+            e.preventDefault();
+
+            var cek_id = $(this).attr('data-id');
+            var csrfToken = '{{ csrf_token() }}';
+
+            // Konfirmasi #1: Warning informasi risiko
+            Swal.fire({
+                title: 'Hapus Data Pelanggan?',
+                html: `
+                    <p class="text-left mb-2">
+                        Tindakan ini akan <b>menghapus permanen</b> untuk instalasi ini:
+                    </p>
+                    <ul class="text-left mb-2">
+                        <li>Data instalasi (No. Induk, paket, alamat, dll)</li>
+                        <li>Seluruh riwayat pemakaian (usage)</li>
+                        <li>Seluruh transaksi pembayaran terkait</li>
+                    </ul>
+                    <p class="text-left mb-2">
+                        <b>Data customer (nama, NIK, foto, dll) tetap disimpan</b>
+                        karena mungkin masih digunakan instalasi lain.
+                    </p>
+                    <p class="text-left text-danger mb-0">
+                        <b>Tindakan ini tidak dapat dibatalkan.</b>
+                    </p>
+                `,
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonText: 'Saya Mengerti, Lanjut',
+                cancelButtonText: 'Batal',
+                reverseButtons: true,
+                confirmButtonColor: '#dc3545',
+                cancelButtonColor: '#6c757d'
+            }).then((result1) => {
+                if (!result1.isConfirmed) {
+                    Swal.fire({
+                        title: 'Dibatalkan',
+                        text: 'Data pelanggan tidak jadi dihapus.',
+                        icon: 'info',
+                        confirmButtonText: 'OK'
+                    });
+                    return;
+                }
+
+                // Konfirmasi #2: User harus ketik "HAPUS" untuk konfirmasi ekstra
+                Swal.fire({
+                    title: 'Konfirmasi Terakhir',
+                    html: `
+                        <p>Ketik <b class="text-danger">HAPUS</b> pada kolom di bawah ini untuk melanjutkan penghapusan permanen.</p>
+                        <input type="text" id="konfirmasi_hapus" class="swal2-input" placeholder="Ketik HAPUS" autocomplete="off">
+                    `,
+                    icon: 'error',
+                    showCancelButton: true,
+                    confirmButtonText: 'Hapus Permanen',
+                    cancelButtonText: 'Batal',
+                    reverseButtons: true,
+                    confirmButtonColor: '#dc3545',
+                    cancelButtonColor: '#6c757d',
+                    preConfirm: () => {
+                        const inputVal = document.getElementById('konfirmasi_hapus').value.trim();
+                        if (inputVal !== 'HAPUS') {
+                            Swal.showValidationMessage('Anda harus mengetik "HAPUS" (huruf besar) untuk melanjutkan.');
+                            return false;
+                        }
+                        return inputVal;
+                    }
+                }).then((result2) => {
+                    if (!result2.isConfirmed) {
+                        Swal.fire({
+                            title: 'Dibatalkan',
+                            text: 'Data pelanggan tidak jadi dihapus.',
+                            icon: 'info',
+                            confirmButtonText: 'OK'
+                        });
+                        return;
+                    }
+
+                    // Submit hapus permanen
+                    $.ajax({
+                        type: 'POST',
+                        url: '/installations/HapusPelanggan/' + cek_id,
+                        data: {
+                            _token: csrfToken,
+                            konfirmasi: result2.value
+                        },
+                        success: function(response) {
+                            Swal.fire({
+                                title: 'Berhasil!',
+                                text: response.msg,
+                                icon: 'success',
+                                confirmButtonText: 'OK'
+                            }).then((res) => {
+                                if (res.isConfirmed) {
+                                    window.location.href = '/installations?status=C';
+                                }
+                            });
+                        },
+                        error: function(xhr) {
+                            const response = xhr.responseJSON;
+                            const errorMsg = response && response.msg
+                                ? response.msg
+                                : 'Terjadi kesalahan saat menghapus data.';
+                            Swal.fire({
+                                title: 'Gagal',
+                                text: errorMsg,
+                                icon: 'error',
+                                confirmButtonText: 'OK'
+                            });
+                        }
+                    });
+                });
+            });
         });
 
         $("#total").maskMoney({

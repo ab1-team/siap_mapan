@@ -17,6 +17,7 @@ use App\Utils\Tanggal;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Session;
 use Illuminate\Support\Facades\Validator;
 use SimpleSoftwareIO\QrCode\Facades\QrCode;
@@ -694,9 +695,16 @@ class InstallationsController extends Controller
             ['rekening_debit', $rekening_debit->id],
             ['rekening_kredit', $rekening_kredit->id],
         ])->sum('total');
+
+        // Hitung jumlah tunggakan untuk validasi tombol kembali ke aktif
+        $jumlah_tunggakan = Usage::where('business_id', $business_id)
+            ->where('id_instalasi', $installation->id)
+            ->where('status', 'UNPAID')
+            ->count();
+
         $qr = QrCode::generate($installation->id);
 
-        return view('perguliran.partials.blokir')->with(compact('installation', 'tampil_settings', 'trx', 'qr'));
+        return view('perguliran.partials.blokir')->with(compact('installation', 'tampil_settings', 'trx', 'qr', 'jumlah_tunggakan'));
     }
 
     /**
@@ -1027,22 +1035,134 @@ class InstallationsController extends Controller
 
     /**
      * Update Detail Status B kembali menjaddi Aktif.
+     * Syarat: instalasi tidak memiliki tunggakan (Usage dengan status UNPAID).
      */
     public function KembaliStatus_A($id)
     {
-        $instal = Installations::where('business_id', Session::get('business_id'))->where('id', $id)->update([
-            'business_id' => Session::get('business_id'),
+        $businessId = Session::get('business_id');
+
+        // Pastikan instalasi milik business yang sedang login
+        $installation = Installations::where('business_id', $businessId)->where('id', $id)->first();
+        if (! $installation) {
+            return response()->json([
+                'success' => false,
+                'msg' => 'Instalasi tidak ditemukan',
+            ], 404);
+        }
+
+        // Cek tunggakan: Usage dengan status UNPAID pada instalasi ini
+        $jumlahTunggakan = Usage::where('business_id', $businessId)
+            ->where('id_instalasi', $id)
+            ->where('status', 'UNPAID')
+            ->count();
+
+        if ($jumlahTunggakan > 0) {
+            return response()->json([
+                'success' => false,
+                'msg' => 'Tidak dapat diaktifkan. Instalasi masih memiliki ' . $jumlahTunggakan . ' tunggakan yang belum dilunasi.',
+                'jumlah_tunggakan' => $jumlahTunggakan,
+            ], 422);
+        }
+
+        $instal = Installations::where('business_id', $businessId)->where('id', $id)->update([
+            'business_id' => $businessId,
             'status' => 'A',
         ]);
 
         return response()->json([
             'success' => true,
-            'msg' => '"Data berhasil diaktifkan dan statusnya dikembalikan menjadi Aktif."',
+            'msg' => 'Data berhasil diaktifkan dan statusnya dikembalikan menjadi Aktif.',
             'kembaliA' => $instal,
         ]);
     }
 
     /**
+     * Update Detail Status A menjadi BLOKIR (B).
+     */
+    public function BlokirStatus_B(Request $request, $id)
+    {
+        $data = $request->only(['blokir']);
+
+        $rules = [
+            'blokir' => 'required',
+        ];
+
+        $validate = Validator::make($data, $rules);
+        if ($validate->fails()) {
+            return response()->json($validate->errors(), Response::HTTP_MOVED_PERMANENTLY);
+        }
+
+        $instal = Installations::where('business_id', Session::get('business_id'))->where('id', $id)->update([
+            'business_id' => Session::get('business_id'),
+            'blokir' => Tanggal::tglNasional($request->blokir),
+            'status' => 'B',
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'msg' => 'Instalasi berhasil diblokir',
+            'blokir' => $instal,
+        ]);
+    }
+
+    /**
+     * Menghapus permanen semua data instalasi (riwayat) dari halaman detail CABUT.
+     * TIDAK menghapus data customer (mungkin masih dipakai instalasi lain).
+     */
+    public function HapusPelanggan(Request $request, $id)
+    {
+        $businessId = Session::get('business_id');
+
+        // Pastikan instalasi milik business yang sedang login dan berstatus C (Copot)
+        $installation = Installations::where('business_id', $businessId)->where('id', $id)->first();
+        if (! $installation) {
+            return response()->json([
+                'success' => false,
+                'msg' => 'Instalasi tidak ditemukan',
+            ], 404);
+        }
+
+        if ($installation->status !== 'C') {
+            return response()->json([
+                'success' => false,
+                'msg' => 'Penghapusan hanya dapat dilakukan dari detail instalasi berstatus CABUT.',
+            ], 422);
+        }
+
+        $confirmation = strtoupper(trim((string) $request->input('konfirmasi')));
+        if ($confirmation !== 'HAPUS') {
+            return response()->json([
+                'success' => false,
+                'msg' => 'Konfirmasi tidak valid. Anda harus mengetik "HAPUS" untuk melanjutkan.',
+            ], 422);
+        }
+
+        try {
+            DB::beginTransaction();
+
+            // Hapus data terkait instalasi (riwayat permanen)
+            Transaction::where('installation_id', $id)->delete();
+            Usage::where('id_instalasi', $id)->delete();
+            Installations::where('id', $id)->delete();
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'msg' => 'Semua data instalasi (transaksi & pemakaian) berhasil dihapus permanen. Data customer tetap disimpan.',
+                'hapus' => $id,
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+
+            return response()->json([
+                'success' => false,
+                'msg' => 'Gagal menghapus data: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+/**
      * menghapus data instalasi status R.
      */
     public function destroy(Installations $installation)
