@@ -20,14 +20,30 @@ Pengecekan sensitivitas huruf `App\Utils\Keuangan` di dashboard dan view terkait
 - View `welcome.blade.php`: tidak pakai class Keuangan (semua variabel yang dilempar controller adalah primitive/array).
 - `composer dump-autoload` & `php artisan optimize:clear` sudah dijalankan di lokal untuk memastikan autoloader fresh.
 
+## Fix nama file Keuangan.php (commit dc11590)
+
+Akar masalah error **"Class App\\Utils\\Keuangan not found"** di Linux production:
+- Di repo GitHub, file `app/Utils/keuangan.php` dan `app/Utils/tanggal.php` tersimpan dengan **huruf kecil** sejak Januari 2025 (commit `465256c`).
+- Semua `use` statement di codebase pakai **PascalCase** (`App\Utils\Keuangan`, `App\Utils\Tanggal`).
+- Di Windows filesystem case-insensitive, jadi kelihatan jalan; di Linux (production) case-sensitive → PSR-4 cari `Keuangan.php` tapi file cuma ada `keuangan.php` → Class not found.
+- Fix: commit `dc11590` rename `keuangan.php` → `Keuangan.php` dan `tanggal.php` → `Tanggal.php`. Setelah ini PSR-4 autoloading jalan di Linux.
+
+Pastikan juga di server hosting file-nya sudah benar:
+```bash
+ls -la /path/to/app/app/Utils/
+# Harus menampilkan Keuangan.php dan Tanggal.php (huruf besar)
+```
+
 ## Cara pull manual ke hosting
 
 ```bash
 cd /path/to/app
 git pull origin master
+composer dump-autoload --optimize-autoloader
 php artisan view:clear
 php artisan cache:clear
 php artisan config:clear
+php artisan route:clear
 ```
 
 Atau upload manual `public/assets/css/custom.css` via FTP dari commit `d8ebb03`.
