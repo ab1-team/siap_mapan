@@ -234,6 +234,16 @@ Route::middleware(['auth', 'auth.token'])->group(function () {
     Route::get('/transactions/data/{id}', [TransactionController::class, 'data']);
     Route::post('/transactions/reversal', [TransactionController::class, 'reversal']);
     Route::post('/transactions/hapus', [TransactionController::class, 'hapus']);
+
+    // Reversal Piutang Tunggakan
+    // Daftar instalasi yang punya transaksi piutang tunggakan namun
+    // usage-nya berstatus PAID (artinya sebenarnya sudah dibayar oleh
+    // pelanggan via transfer sebelum tanggal generate tunggakan, tapi
+    // baru dicatat di aplikasi setelah generate tunggakan berjalan).
+    Route::get('/transactions/reversal_piutang', [TransactionController::class, 'reversalPiutang']);
+    Route::post('/transactions/reversal_piutang/proses', [TransactionController::class, 'prosesReversalPiutang']);
+    Route::get('/transactions/reversal_piutang/detail/{installation}', [TransactionController::class, 'detailReversalPiutang']);
+
     Route::resource('/transactions', TransactionController::class);
 
     // Setting || Pengaturan

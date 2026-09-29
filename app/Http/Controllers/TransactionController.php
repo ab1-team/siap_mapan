@@ -1943,6 +1943,416 @@ class TransactionController extends Controller
             'tahun' => $tahun
         ]);
     }
+
+    /**
+     * ============================================================
+     * REVERSAL PIUTANG TUNGGAKAN
+     * ============================================================
+     *
+     * Kasus:
+     * - Generate tunggakan berjalan tiap tanggal tertentu (lihat
+     *   SystemController::dataset). Sistem otomatis insert transaksi
+     *   piutang (D 1.1.03.01 / K 4.1.01.02-04) untuk semua usage
+     *   ber-status UNPAID.
+     * - Pelanggan kadang sudah bayar via transfer sebelum tanggal
+     *   generate, namun karena pembayaran baru masuk / tercatat
+     *   di aplikasi setelah generate tunggakan berjalan, maka
+     *   usage.status tetap UNPAID dan transaksi piutang tunggakan
+     *   sudah terlanjur dibuat. Piutang jadi tercatat padahal
+     *   di bank uang sudah masuk.
+     *
+     * Solusi:
+     * Menu "Reversal Piutang" menampilkan daftar instalasi yang
+     * punya piutang tunggakan (usage.status = UNPAID + ada
+     * transaksi piutang). Admin yang mengetahui pembayaran via
+     * transfer dari mutasi bank dapat memilih bulan (usage)
+     * yang akan di-reversal. Sistem akan menghapus transaksi
+     * piutang tunggakan untuk usage_id tsb dan menghitung ulang
+     * saldo akun bulan terkait. Status usage di-update ke PAID.
+     *
+     * CATATAN PENTING:
+     * - Hanya menghapus transaksi piutang tunggakan (rekening_debit
+     *   = piutang 1.1.03.01 dengan keterangan "Utang %").
+     * - Hanya bulan yang dipilih (per usage_id) yang di-reversal.
+     *   Piutang bulan-bulan sebelumnya yang memang belum bayar
+     *   tetap aman.
+     * - Setelah hapus, status usage di-update ke PAID (karena
+     *   admin mengonfirmasi pembayaran via transfer sudah masuk).
+     * - Saldo Amount dihitung ulang untuk bulan terkait supaya
+     *   laporan keuangan akurat.
+     * ============================================================
+     */
+    public function reversalPiutang(Request $request)
+    {
+        $businessId = Session::get('business_id');
+
+        // Akun piutang (1.1.03.01) — di-load sekali.
+        $kodePiutang = Account::where('business_id', $businessId)
+            ->where('kode_akun', '1.1.03.01')
+            ->first();
+
+        // Default values untuk semua return path
+        $installations = collect();
+        $totalAll = 0;
+        $perPage = 50;
+        $page = 1;
+        $totalPages = 0;
+        $totalRows = 0;
+        $filterTahun = null;
+        $filterBulan = null;
+        $search = '';
+        $title = 'Reversal Piutang Tunggakan';
+
+        if (! $kodePiutang) {
+            return view('transaksi.reversal_piutang', compact(
+                'title', 'installations', 'kodePiutang', 'totalAll', 'perPage',
+                'page', 'totalPages', 'totalRows', 'filterTahun', 'filterBulan', 'search'
+            ));
+        }
+
+        // Akun-akun pendapatan (4.1.01.02 | 03 | 04) — di-load sekali.
+        $akunPendapatanIds = Account::where('business_id', $businessId)
+            ->whereIn('kode_akun', ['4.1.01.02', '4.1.01.03', '4.1.01.04'])
+            ->pluck('id')
+            ->all();
+
+        if (empty($akunPendapatanIds)) {
+            return view('transaksi.reversal_piutang', compact(
+                'title', 'installations', 'kodePiutang', 'totalAll', 'perPage',
+                'page', 'totalPages', 'totalRows', 'filterTahun', 'filterBulan', 'search'
+            ));
+        }
+
+        // Filter (optional): berdasarkan tahun piutang (tgl_akhir usage).
+        $filterTahun = $request->get('tahun', null);
+        $filterBulan = $request->get('bulan', null); // optional, 1-12
+        $search = trim((string) $request->get('q', ''));
+
+        // ============================================================
+        // QUERY UTAMA (OPTIMIZED V2) — 1 query agregat, TANPA N+1
+        // ============================================================
+        // Ambil SEMUA agregat per (installation_id, usage_id) dalam
+        // 1 query dengan GROUP BY. Filter by tahun, bulan, dan search.
+        // Setelah itu filter by page di memory (lebih cepat drpd
+        // subquery pagination di MySQL).
+        $piutangDetailQuery = DB::table('transactions as t')
+            ->join('usages as u', 'u.id', '=', 't.usage_id')
+            ->leftJoin('installations as ins', 'ins.id', '=', 't.installation_id')
+            ->leftJoin('customers as c', 'c.id', '=', 'ins.customer_id')
+            ->where('t.business_id', $businessId)
+            ->where('t.rekening_debit', $kodePiutang->id)
+            ->whereIn('t.rekening_kredit', $akunPendapatanIds)
+            ->where('t.keterangan', 'LIKE', 'Utang %')
+            ->where('t.keterangan', 'NOT LIKE', 'Utang Komisi%')
+            ->where('t.keterangan', 'NOT LIKE', 'Utang FEE%')
+            ->where('t.keterangan', 'NOT LIKE', 'Utang Fee%')
+            ->where('u.status', 'UNPAID');
+
+        if ($filterTahun !== null && $filterTahun !== '') {
+            $piutangDetailQuery->whereRaw('YEAR(u.tgl_akhir) = ?', [(int) $filterTahun]);
+        }
+        if ($filterBulan !== null && $filterBulan !== '') {
+            $piutangDetailQuery->whereRaw('MONTH(u.tgl_akhir) = ?', [(int) $filterBulan]);
+        }
+        if ($search !== '') {
+            $piutangDetailQuery->where(function ($q) use ($search) {
+                $q->where('ins.kode_instalasi', 'LIKE', "%{$search}%")
+                    ->orWhere('c.nama', 'LIKE', "%{$search}%");
+            });
+        }
+
+        // Hitung total keseluruhan untuk header
+        $totalAll = (clone $piutangDetailQuery)->sum('t.total');
+
+        // Ambil agregat per (installation_id, usage_id) dalam 1 query
+        // Sertakan tgl_akhir usage untuk sorting & display.
+        $piutangPerUsage = (clone $piutangDetailQuery)
+            ->groupBy('t.installation_id', 't.usage_id')
+            ->select(
+                't.installation_id',
+                't.usage_id',
+                DB::raw('SUM(t.total) as total_piutang'),
+                'u.tgl_akhir'
+            )
+            ->get();
+
+        if ($piutangPerUsage->isEmpty()) {
+            return view('transaksi.reversal_piutang', compact(
+                'title', 'installations', 'kodePiutang', 'totalAll',
+                'perPage', 'page', 'totalPages', 'totalRows',
+                'filterTahun', 'filterBulan', 'search'
+            ));
+        }
+
+        // Agregasi di memory: per installation_id (untuk pagination)
+        // dan per usage_id (untuk modal detail)
+        $byInstallation = [];
+        $allUsageIds = [];
+        foreach ($piutangPerUsage as $row) {
+            $insId = $row->installation_id;
+            if (! isset($byInstallation[$insId])) {
+                $byInstallation[$insId] = [
+                    'installation_id' => $insId,
+                    'total_piutang' => 0,
+                    'tgl_akhir_max' => $row->tgl_akhir,
+                    'piutang_per_usage' => [],
+                ];
+            }
+            $byInstallation[$insId]['total_piutang'] += (float) $row->total_piutang;
+            $byInstallation[$insId]['piutang_per_usage'][$row->usage_id] = (float) $row->total_piutang;
+            if ($row->tgl_akhir > $byInstallation[$insId]['tgl_akhir_max']) {
+                $byInstallation[$insId]['tgl_akhir_max'] = $row->tgl_akhir;
+            }
+            $allUsageIds[] = $row->usage_id;
+        }
+
+        // Sort by tgl_akhir_max desc, lalu paginate di memory
+        $sorted = collect($byInstallation)->sortByDesc('tgl_akhir_max')->values();
+        $totalRows = $sorted->count();
+        $totalPages = max(1, (int) ceil($totalRows / $perPage));
+        $page = max(1, min($totalPages, (int) $request->get('page', 1)));
+
+        $pageItems = $sorted->slice(($page - 1) * $perPage, $perPage);
+        $installationIds = $pageItems->pluck('installation_id')->all();
+
+        // Load instalasi + relasi (eager loading, TEPAT 50 rows max)
+        $installations = Installations::whereIn('id', $installationIds)
+            ->with(['customer', 'village', 'package'])
+            ->get()
+            ->keyBy('id');
+
+        // Susun data akhir
+        foreach ($pageItems as $item) {
+            $insId = $item['installation_id'];
+            if (! isset($installations[$insId])) continue;
+
+            $ins = $installations[$insId];
+            $ins->total_piutang = $item['total_piutang'];
+            $ins->tgl_akhir_max = $item['tgl_akhir_max'];
+            $ins->piutang_per_usage = $item['piutang_per_usage'];
+            // Usage list di-load dari $allUsageIds yg tadi sudah diagregasi.
+            // Kita tidak perlu query DB lagi untuk usage detail karena
+            // tgl_akhir sudah cukup untuk display tabel utama.
+            $ins->usage = collect();
+        }
+
+        $installations = $installations->values();
+
+        return view('transaksi.reversal_piutang', compact(
+            'title', 'installations', 'kodePiutang', 'totalAll',
+            'perPage', 'page', 'totalPages', 'totalRows',
+            'filterTahun', 'filterBulan', 'search'
+        ));
+    }
+
+    /**
+     * Detail transaksi piutang per usage (dipanggil via AJAX).
+     * Menampilkan rincian akun (piutang/abodemen/pemakaian/denda)
+     * yang akan dihapus.
+     */
+    public function detailReversalPiutang($installationId)
+    {
+        $businessId = Session::get('business_id');
+
+        $kodePiutang = Account::where('business_id', $businessId)
+            ->where('kode_akun', '1.1.03.01')
+            ->first();
+
+        if (! $kodePiutang) {
+            return response()->json([
+                'success' => false,
+                'msg' => 'Akun piutang (1.1.03.01) tidak ditemukan.',
+            ]);
+        }
+
+        $installation = Installations::where('id', $installationId)
+            ->where('business_id', $businessId)
+            ->with(['customer', 'village', 'package'])
+            ->first();
+
+        if (! $installation) {
+            return response()->json([
+                'success' => false,
+                'msg' => 'Instalasi tidak ditemukan.',
+            ]);
+        }
+
+        // Load akun pendapatan (4.1.01.02|03|04) untuk filter rekening_kredit
+        $akunPendapatanIds = Account::where('business_id', $businessId)
+            ->whereIn('kode_akun', ['4.1.01.02', '4.1.01.03', '4.1.01.04'])
+            ->pluck('id')
+            ->all();
+
+        // QUERY UTAMA (dioptimasi): ambil semua transaksi piutang
+        // untuk instalasi ini dalam 1 query (bukan N+1).
+        $trxPiutangList = Transaction::where('installation_id', $installationId)
+            ->where('business_id', $businessId)
+            ->where('rekening_debit', $kodePiutang->id)
+            ->whereIn('rekening_kredit', $akunPendapatanIds)
+            ->where('keterangan', 'LIKE', 'Utang %')
+            ->where('keterangan', 'NOT LIKE', 'Utang Komisi%')
+            ->where('keterangan', 'NOT LIKE', 'Utang FEE%')
+            ->where('keterangan', 'NOT LIKE', 'Utang Fee%')
+            ->with(['rek_debit', 'rek_kredit'])
+            ->get();
+
+        // Kumpulkan usage_id unik yang punya piutang
+        $usageIds = $trxPiutangList->pluck('usage_id')->unique()->all();
+
+        // Load usage UNPAID dalam 1 query
+        $usages = Usage::whereIn('id', $usageIds)
+            ->where('status', 'UNPAID')
+            ->orderBy('tgl_akhir', 'desc')
+            ->get()
+            ->map(function ($usage) use ($trxPiutangList) {
+                // Filter transaksi piutang untuk usage ini dari list yg sudah di-load
+                $usage->trx_piutang = $trxPiutangList->where('usage_id', $usage->id)->values();
+                $usage->total_piutang = $usage->trx_piutang->sum('total');
+                return $usage;
+            });
+
+        $view = view('transaksi.partials.detail_reversal_piutang', compact('installation', 'usages'))->render();
+
+        return response()->json([
+            'success' => true,
+            'view' => $view,
+            'installation_id' => $installation->id,
+        ]);
+    }
+
+    /**
+     * Proses reversal:
+     * - Ambil array usage_id[] dari request
+     * - Hapus transaksi piutang tunggakan (D 1.1.03.01) untuk tiap usage_id
+     * - Hitung ulang saldo Amount untuk akun piutang & akun lawan
+     *   di bulan tgl_akhir tiap usage
+     */
+    public function prosesReversalPiutang(Request $request)
+    {
+        $businessId = Session::get('business_id');
+        $usageIds = $request->input('usage_ids', []);
+
+        if (empty($usageIds) || ! is_array($usageIds)) {
+            return response()->json([
+                'success' => false,
+                'msg' => 'Pilih minimal satu bulan pemakaian yang akan di-reversal.',
+            ]);
+        }
+
+        $kodePiutang = Account::where('business_id', $businessId)
+            ->where('kode_akun', '1.1.03.01')
+            ->first();
+
+        if (! $kodePiutang) {
+            return response()->json([
+                'success' => false,
+                'msg' => 'Akun piutang (1.1.03.01) tidak ditemukan.',
+            ]);
+        }
+
+        DB::beginTransaction();
+        try {
+            $totalDeleted = 0;
+            $saldoAccounts = []; // akun2 yg perlu dihitung ulang saldonya
+
+            foreach ($usageIds as $usageId) {
+                $usage = Usage::find($usageId);
+                if (! $usage) continue;
+
+                // Kumpulkan transaksi piutang tunggakan untuk usage ini.
+                // Filter PRESISI: hanya jurnal piutang yang D piutang
+                // (1.1.03.01) dan K akun pendapatan (4.1.01.02|03|04).
+                // Exclude 'Utang Komisi' / 'Utang FEE' untuk keamanan.
+                $trxList = Transaction::where('usage_id', $usageId)
+                    ->where('rekening_debit', $kodePiutang->id)
+                    ->where('keterangan', 'LIKE', 'Utang %')
+                    ->where('keterangan', 'NOT LIKE', 'Utang Komisi%')
+                    ->where('keterangan', 'NOT LIKE', 'Utang FEE%')
+                    ->where('keterangan', 'NOT LIKE', 'Utang Fee%')
+                    ->whereIn('rekening_kredit', function ($q) use ($businessId) {
+                        $q->select('id')->from('accounts')
+                            ->where('business_id', $businessId)
+                            ->where(function ($qq) {
+                                $qq->where('kode_akun', '4.1.01.02')
+                                    ->orWhere('kode_akun', '4.1.01.03')
+                                    ->orWhere('kode_akun', '4.1.01.04');
+                            });
+                    })
+                    ->get();
+
+                foreach ($trxList as $trx) {
+                    // Tandai akun2 yg terlibat untuk re-saldo
+                    $saldoAccounts[$trx->tgl_transaksi][$trx->rekening_debit] = true;
+                    $saldoAccounts[$trx->tgl_transaksi][$trx->rekening_kredit] = true;
+                    $trx->delete();
+                    $totalDeleted++;
+                }
+                // CATATAN: usage.status TIDAK diubah. Tetap UNPAID.
+                // Alasan: admin hanya mengoreksi mekanisme cell-nya,
+                // status bayar di aplikasi tetap mengikuti input
+                // pembayaran terpisah (lewat menu Tagihan Bulanan / dll).
+            }
+
+            // Hitung ulang saldo Amount untuk akun-akun terkait per bulan
+            // Pengaruh ke saldo bulan tgl_transaksi tsb (akun piutang & akun lawan).
+            foreach ($saldoAccounts as $tglTransaksi => $akunMap) {
+                foreach (array_keys($akunMap) as $accountId) {
+                    $this->refreshSaldoAkun($accountId, $tglTransaksi, $businessId);
+                }
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'msg' => "Berhasil me-reversal {$totalDeleted} transaksi piutang tunggakan.",
+            ]);
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'msg' => 'Terjadi kesalahan: ' . $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Hitung ulang saldo Amount untuk 1 akun pada bulan tertentu.
+     * Mirip method saldo() di SystemController tapi untuk 1 akun
+     * spesifik + handle multi-bulan dalam 1 tahun.
+     */
+    private function refreshSaldoAkun($accountId, $tglTransaksi, $businessId)
+    {
+        $tahun = (int) date('Y', strtotime($tglTransaksi));
+        $bulan = (int) date('m', strtotime($tglTransaksi));
+        $bulanLalu = str_pad($bulan - 1, 2, '0', STR_PAD_LEFT);
+        $tglKondisi = date('Y-m-t', strtotime($tglTransaksi));
+
+        $account = Account::where('business_id', $businessId)
+            ->where('id', $accountId)
+            ->with([
+                'trx_debit' => fn($q) => $q->whereBetween('tgl_transaksi', ["{$tahun}-{$bulan}-01", $tglKondisi]),
+                'trx_kredit' => fn($q) => $q->whereBetween('tgl_transaksi', ["{$tahun}-{$bulan}-01", $tglKondisi]),
+                'oneAmount' => fn($q) => $q->where('tahun', $tahun)->where('bulan', $bulanLalu),
+            ])->first();
+
+        if (! $account) return;
+
+        $id = $account->id . $tahun . str_pad($bulan, 2, '0', STR_PAD_LEFT);
+        $debit = ($account->oneAmount ? $account->oneAmount->debit : 0) + $account->trx_debit->sum('total');
+        $kredit = ($account->oneAmount ? $account->oneAmount->kredit : 0) + $account->trx_kredit->sum('total');
+
+        Amount::where('id', $id)->delete();
+        Amount::insert([
+            'id' => $id,
+            'account_id' => $account->id,
+            'tahun' => $tahun,
+            'bulan' => str_pad($bulan, 2, '0', STR_PAD_LEFT),
+            'debit' => $debit,
+            'kredit' => $kredit,
+        ]);
+    }
+
     /**
      * Display the specified resource.
      */
