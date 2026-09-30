@@ -28,6 +28,32 @@
         href="https://cdnjs.cloudflare.com/ajax/libs/jquery-datetimepicker/2.5.20/jquery.datetimepicker.min.css">
 
     <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+
+    <style>
+        /* Styling tambahan untuk SweetAlert Logout */
+        .swal-logout-popup .swal2-title {
+            font-size: 1.5rem !important;
+            color: #e74a3b;
+        }
+        .swal-logout-popup .swal2-html-container {
+            margin-top: 1rem !important;
+        }
+        .swal-logout-popup {
+            border-radius: 12px !important;
+            padding: 1.5rem !important;
+        }
+        .swal2-popup.swal-logout-popup {
+            box-shadow: 0 10px 40px rgba(231, 74, 59, 0.25) !important;
+        }
+        .swal-logout-popup .btn {
+            margin: 0 4px !important;
+            transition: all 0.2s ease;
+        }
+        .swal-logout-popup .btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
+    </style>
     <link rel="stylesheet"
         href="https://cdn.jsdelivr.net/npm/@ttskch/select2-bootstrap4-theme/dist/select2-bootstrap4.min.css">
 
@@ -207,13 +233,49 @@
             e.preventDefault();
 
             Swal.fire({
-                title: "Konfirmasi Logout",
-                icon: 'info',
+                title: '<i class="fas fa-sign-out-alt text-danger"></i> Konfirmasi Logout',
+                html: `
+                    <div class="text-center mb-2">
+                        <span class="badge badge-danger p-2" style="font-size: 14px;">
+                            <i class="fas fa-exclamation-triangle mr-1"></i> Anda akan keluar dari sesi ini
+                        </span>
+                    </div>
+                    <p class="mt-3 mb-1 text-dark">Apakah Anda yakin ingin <b>logout</b> sekarang?</p>
+                    <small class="text-muted"><i class="fas fa-info-circle"></i> Pastikan semua pekerjaan sudah tersimpan sebelum keluar.</small>
+                `,
+                icon: 'warning',
+                iconColor: '#e74a3b',
+                showCancelButton: false,
                 showDenyButton: true,
-                confirmButtonText: "Logout",
-                denyButtonText: "Batal",
+                confirmButtonText: '<i class="fas fa-sign-out-alt mr-1"></i> Logout',
+                denyButtonText: '<i class="fas fa-times mr-1"></i> Batal',
+                showCloseButton: false,
+                focusConfirm: false,
+                confirmButtonColor: '#e74a3b',
+                denyButtonColor: '#858796',
+                reverseButtons: true,
+                customClass: {
+                    confirmButton: 'btn btn-danger btn-sm px-3',
+                    denyButton: 'btn btn-secondary btn-sm px-3',
+                    popup: 'swal-logout-popup'
+                },
+                buttonsStyling: false,
+                backdrop: 'rgba(78, 115, 223, 0.4)',
+                timer: 15000,
+                timerProgressBar: true,
             }).then((result) => {
                 if (result.isConfirmed) {
+                    // Tampilkan loading sebelum submit
+                    Swal.fire({
+                        title: 'Logging out...',
+                        text: 'Mohon tunggu sebentar',
+                        allowOutsideClick: false,
+                        allowEscapeKey: false,
+                        showConfirmButton: false,
+                        didOpen: () => {
+                            Swal.showLoading();
+                        }
+                    });
                     $('#logoutForm').submit();
                 }
             });
