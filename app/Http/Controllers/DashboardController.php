@@ -24,34 +24,55 @@ class DashboardController extends Controller
         $businessId = Session::get('business_id');
         $today      = date('Y-m-d');
 
-        // ---- Semua angka di sini sekarang adalah COUNT langsung di SQL,
-        // ---- tanpa eager-load relasi yang tidak ditampilkan di view.
-        $Installation = Installations::where('business_id', $businessId)->count();
+        // ---- Hitungan dashboard di-cache 5 menit per business_id.
+        // ---- Tanpa index, whereHas(usage) >=3 butuh ~64 detik di DB.
+        // ---- Cache key berdasarkan business + tanggal (auto-refresh tiap hari).
+        $cacheKey = "dashboard.counts.{$businessId}.{$today}";
 
-        // UsageCount = jumlah instalasi aktif yang punya usage dengan tgl_akhir <= hari ini.
-        // Pakai EXISTS (subquery) -> jauh lebih cepat dari load semua + get.
-        $UsageCount = Installations::where('business_id', $businessId)
-            ->where('status', 'A')
-            ->whereExists(function ($q) use ($today) {
-                $q->select(DB::raw(1))
-                  ->from('usages')
-                  ->whereColumn('usages.id_instalasi', 'installations.id')
-                  ->where('tgl_akhir', '<=', $today);
-            })
-            ->count();
+        $counts = Cache::remember($cacheKey, now()->addMinutes(5), function () use ($businessId, $today) {
+            // Jumlah seluruh instalasi untuk business ini
+            $installation = Installations::where('business_id', $businessId)->count();
 
-        $Tagihan = Usage::where('business_id', $businessId)
-            ->where('status', 'UNPAID')
-            ->where('tgl_akhir', '<', $today)
-            ->count();
-
-        $Tunggakan = Installations::where('business_id', $businessId)
-            ->where('status', 'A')
-            ->whereHas('usage', function (Builder $query) use ($today) {
-                $query->where('status', 'UNPAID')
+            // Jumlah instalasi aktif yang punya usage dengan tgl_akhir <= hari ini
+            $usageCount = Installations::where('business_id', $businessId)
+                ->where('status', 'A')
+                ->whereExists(function ($q) use ($today) {
+                    $q->select(DB::raw(1))
+                      ->from('usages')
+                      ->whereColumn('usages.id_instalasi', 'installations.id')
                       ->where('tgl_akhir', '<=', $today);
-            }, '>=', 3)
-            ->count();
+                })
+                ->count();
+
+            // Jumlah tagihan UNPAID yang sudah jatuh tempo
+            $tagihan = Usage::where('business_id', $businessId)
+                ->where('status', 'UNPAID')
+                ->where('tgl_akhir', '<', $today)
+                ->count();
+
+            // Jumlah instalasi dengan tunggakan >= 3 bulan (PALING BERAT -
+            // correlated subquery ke tabel usages). Cache ini yang menyelamatkan
+            // dashboard dari 64 detik per request.
+            $tunggakan = Installations::where('business_id', $businessId)
+                ->where('status', 'A')
+                ->whereHas('usage', function (Builder $query) use ($today) {
+                    $query->where('status', 'UNPAID')
+                          ->where('tgl_akhir', '<=', $today);
+                }, '>=', 3)
+                ->count();
+
+            return [
+                'installation' => $installation,
+                'usage_count'  => $usageCount,
+                'tagihan'      => $tagihan,
+                'tunggakan'    => $tunggakan,
+            ];
+        });
+
+        $Installation = $counts['installation'];
+        $UsageCount   = $counts['usage_count'];
+        $Tagihan      = $counts['tagihan'];
+        $Tunggakan    = $counts['tunggakan'];
 
         $bulan = intval(date('m'));
         $chart = $this->chart(); // sudah di-cache 1 jam
@@ -67,7 +88,7 @@ class DashboardController extends Controller
         $charts = json_encode($chart);
 
         $title    = 'Dashboard';
-        $api      = env('APP_API', 'http://localhost:8080');
+        $api      = config('app.api', 'http://localhost:8080');
         $business = Business::where('id', $businessId)->first();
 
         return view('welcome')->with(compact(
@@ -83,17 +104,17 @@ class DashboardController extends Controller
         $cater_id = $request->query('cater_id');
         $business_id = Session::get('business_id');
 
-        $air = Installations::where('kategori', 1)
-            ->where('cater_id', $cater_id)
+        // Gabung 2 count jadi 1 query dengan conditional SUM.
+        // Hemat 1 round-trip ke DB.
+        $row = Installations::where('cater_id', $cater_id)
             ->where('status', 'A')
             ->where('business_id', $business_id)
-            ->count();
+            ->selectRaw('SUM(CASE WHEN kategori = 1 THEN 1 ELSE 0 END) AS air,
+                         SUM(CASE WHEN kategori = 2 THEN 1 ELSE 0 END) AS sampah')
+            ->first();
 
-        $sampah = Installations::where('kategori', 2)
-            ->where('cater_id', $cater_id)
-            ->where('status', 'A')
-            ->where('business_id', $business_id)
-            ->count();
+        $air    = (int) ($row->air ?? 0);
+        $sampah = (int) ($row->sampah ?? 0);
 
         return view('partialsDashboard.usages', compact('air', 'sampah'));
     }
@@ -106,11 +127,16 @@ class DashboardController extends Controller
 
         $kategori = $type == 'air' ? 1 : 2;
 
-        $aktif = Installations::with(['customer', 'package'])
+        // Hanya kolom yang dipakai view (usages.blade.php ~139-156):
+        //   kode_instalasi, customer.nama, customer.alamat, rw, rt, aktif,
+        //   package.kelas
+        $aktif = Installations::with(['customer:id,nama,alamat', 'package:id,kelas'])
             ->where('kategori', $kategori)
             ->where('status', 'A')
             ->where('cater_id', $cater_id)
             ->where('business_id', $business_id)
+            ->select('id', 'kode_instalasi', 'customer_id', 'package_id', 'rw', 'rt', 'aktif')
+            ->limit(300)
             ->get();
 
         return response()->json([
@@ -120,18 +146,47 @@ class DashboardController extends Controller
 
     public function installations()
     {
-        $Permohonan = Installations::where('business_id', Session::get('business_id'))->where('status', '0')->orwhere('status', 'R')->with([
-            'customer',
-            'package'
-        ])->get();
-        $Pasang = Installations::where('business_id', Session::get('business_id'))->where('status', 'I')->with([
-            'customer',
-            'package'
-        ])->get();
-        $Aktif = Installations::where('business_id', Session::get('business_id'))->where('status', 'A')->with([
-            'customer',
-            'package'
-        ])->get();
+        $businessId = Session::get('business_id');
+        // Batas row per status supaya JSON payload tetap kecil & render
+        // DOM tetap cepat. View render semua row di forEach tanpa pagination.
+        $limit = 200;
+
+        // Perbaikan bug OR-precedence:
+        //   where('business_id', X)->where('status', '0')->orWhere('status', 'R')
+        // sebelumnya compile jadi: business_id=X AND status=0 OR status=R
+        // (status='R' lolos walau business_id beda).
+        // Sekarang dikelompokkan benar.
+        $Permohonan = Installations::where('business_id', $businessId)
+            ->where(function ($q) {
+                $q->where('status', '0')->orWhere('status', 'R');
+            })
+            ->select('id', 'kode_instalasi', 'customer_id', 'package_id', 'order', 'status')
+            ->with([
+                'customer:id,nama,alamat',
+                'package:id,kelas',
+            ])
+            ->limit($limit)
+            ->get();
+
+        $Pasang = Installations::where('business_id', $businessId)
+            ->where('status', 'I')
+            ->select('id', 'kode_instalasi', 'customer_id', 'package_id', 'order', 'status')
+            ->with([
+                'customer:id,nama,alamat',
+                'package:id,kelas',
+            ])
+            ->limit($limit)
+            ->get();
+
+        $Aktif = Installations::where('business_id', $businessId)
+            ->where('status', 'A')
+            ->select('id', 'kode_instalasi', 'customer_id', 'package_id', 'aktif', 'status')
+            ->with([
+                'customer:id,nama,alamat',
+                'package:id,kelas',
+            ])
+            ->limit($limit)
+            ->get();
 
         return response()->json([
             'Permohonan' => $Permohonan,
@@ -142,13 +197,20 @@ class DashboardController extends Controller
 
     public function usages()
     {
-        $Usages = Installations::where('business_id', Session::get('business_id'))->where('status', 'A')->with([
-            'customer',
-            'package',
-            'oneUsage' => function ($query) {
-                $query->where('tgl_akhir', '<=', date('Y-m-d'));
-            }
-        ])->get();
+        $businessId = Session::get('business_id');
+
+        $Usages = Installations::where('business_id', $businessId)
+            ->where('status', 'A')
+            ->select('id', 'kode_instalasi', 'customer_id', 'package_id')
+            ->with([
+                'customer:id,nama',
+                'package:id,kelas',
+                'oneUsage' => function ($query) {
+                    $query->where('tgl_akhir', '<=', date('Y-m-d'));
+                },
+            ])
+            ->limit(200)
+            ->get();
 
         return response()->json([
             'Usages' => $Usages
@@ -158,6 +220,7 @@ class DashboardController extends Controller
     public function tunggakan()
     {
         $today = date('Y-m-d');
+        $businessId = Session::get('business_id');
 
         // Pakai subquery agregat untuk jumlah_tunggakan -> 1 query tambahan,
         // tidak load semua baris Usage.
@@ -167,15 +230,18 @@ class DashboardController extends Controller
             ->whereDate('tgl_akhir', '<=', $today)
             ->groupBy('id_instalasi');
 
-        $tunggakan = Installations::where('business_id', Session::get('business_id'))
+        $tunggakan = Installations::where('business_id', $businessId)
             ->where('status', 'A')
             ->whereHas('usage', function (Builder $query) use ($today) {
                 $query->where('status', 'UNPAID')
                     ->whereDate('tgl_akhir', '<=', $today);
             })
-            ->with(['customer', 'package'])
+            ->select('installations.id', 'installations.kode_instalasi', 'installations.customer_id',
+                     'installations.package_id', 'installations.alamat', 'installations.status_tunggakan')
+            ->with(['customer:id,nama', 'package:id,kelas'])
             ->leftJoinSub($sub, 't', fn ($j) => $j->on('t.id_instalasi', '=', 'installations.id'))
-            ->addSelect('installations.*', 't.jml as jumlah_tunggakan')
+            ->addSelect('t.jml as jumlah_tunggakan')
+            ->limit(200)
             ->get();
 
         return response()->json([
@@ -188,16 +254,34 @@ class DashboardController extends Controller
     public function tagihan()
     {
         $tgl_akhir = request()->get('tgl_akhir') ?: date('Y-m-d');
-        $Tagihan = Usage::where('business_id', Session::get('business_id'))->where([
-            ['status', 'UNPAID'],
-            ['tgl_akhir', '<', $tgl_akhir]
-        ])->with([
-            'installation',
-            'installation.customer',
-            'installation.customer.village',
-            'installation.package'
-        ])->get();
-        $setting = Settings::where('business_id', Session::get('business_id'))->first();
+        $businessId = Session::get('business_id');
+
+        // Hanya kolom yang dipakai view (lihat welcome.blade.php ~700-735):
+        //   item.id, item.jumlah, item.tgl_akhir
+        //   item.installation.id, kode_instalasi
+        //   item.installation.customer.nama, hp
+        //   item.installation.customer.village.nama
+        //   item.installation.package.harga
+        //
+        // Catatan: kolom customers.desa tidak diselect eksplisit (DB live
+        // tidak punya kolom itu). Eager-load village dibiarkan tanpa
+        // constraint select() supaya tidak error bila FK desa null.
+        $Tagihan = Usage::where('business_id', $businessId)
+            ->where([
+                ['status', 'UNPAID'],
+                ['tgl_akhir', '<', $tgl_akhir]
+            ])
+            ->select('id', 'id_instalasi', 'tgl_akhir', 'jumlah')
+            ->with([
+                'installation:id,kode_instalasi,customer_id,package_id',
+                'installation.customer:id,nama,hp',
+                'installation.customer.village:id,nama',
+                'installation.package:id,harga',
+            ])
+            ->limit(200)
+            ->get();
+
+        $setting = Settings::where('business_id', $businessId)->first();
 
         $result = [];
         $block = json_decode($setting->block, true);

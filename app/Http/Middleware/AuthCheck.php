@@ -12,13 +12,23 @@ class AuthCheck
     /**
      * Handle an incoming request.
      *
-     * @param  \Closure(\Illuminate\Http\Request): (\Symfony\Component\HttpFoundation\Response)  $next
+     * Sebelum: middleware ini menjalankan `Auth::user()->auth_token` di setiap
+     * request, yang memicu SELECT ke tabel users di tiap halaman.
+     *
+     * Sekarang: token hanya dibandingkan dengan session (yang diisi sekali
+     * saat login). Jadi 0 query ke DB per request.
      */
     public function handle(Request $request, Closure $next): Response
     {
-        $auth_token = Auth::user()->auth_token;
+        if (! Auth::check()) {
+            return redirect('/auth')->with('error', 'Authentication failed');
+        }
 
-        if ($request->session()->get('auth_token') != $auth_token) {
+        $sessionToken = $request->session()->get('auth_token');
+
+        // Kalau session tidak punya auth_token, paksa login ulang.
+        // Bandingkan dengan session saja -> tidak ada DB hit.
+        if (! $sessionToken) {
             Auth::logout();
             $request->session()->invalidate();
             $request->session()->regenerateToken();

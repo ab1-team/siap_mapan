@@ -111,6 +111,10 @@ return [
 
     'faker_locale' => 'en_US',
 
+    // API gateway untuk WhatsApp blast. Sebelumnya diakses via env() di runtime
+    // (tidak ter-cache), sekarang lewat config().
+    'api' => env('APP_API', 'http://localhost:8080'),
+
     /*
     |--------------------------------------------------------------------------
     | Encryption Key

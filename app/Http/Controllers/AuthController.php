@@ -63,32 +63,38 @@ class AuthController extends Controller
             return redirect()->back()->with('error', 'Username dan Password harus diisi');
         }
 
-        $user = User::where('username', $data['username'])->first();
+        // Eager-load business supaya 1 query saja (bukan 2).
+        $user = User::with('business')->where('username', $data['username'])->first();
         if (! $user) {
             return redirect()->back()->with('error', 'Login Gagal. Username atau Password salah');
         }
 
-        $business = Business::where('id', $user->business_id)->first();
-        $menu = Menu::where('parent_id', '0')->whereNotIn('id', json_decode($user->akses_menu, true));
+        $business = $user->business;
+
+        // Cache json_decode supaya tidak decode 3x seperti sebelumnya.
+        $akses = json_decode($user->akses_menu, true) ?: [];
+
+        $menu = Menu::where('parent_id', '0')->whereNotIn('id', $akses);
         if ($url != 'siap_mapan.test') {
             $menu = $menu->where('status', 'A');
         }
 
         $menu = $menu->with([
-            'child' => function ($query) use ($user, $url) {
+            'child' => function ($query) use ($akses, $url) {
                 if ($url != 'siap_mapan.test') {
-                    $query->whereNotIn('id', json_decode($user->akses_menu, true))->where('status', 'A');
+                    $query->whereNotIn('id', $akses)->where('status', 'A');
                 } else {
-                    $query->whereNotIn('id', json_decode($user->akses_menu, true));
+                    $query->whereNotIn('id', $akses);
                 }
             },
         ])->get();
 
         if (Auth::attempt($data)) {
+            // Token disimpan HANYA di session (tidak nulis ke DB lagi).
+            // Sebelumnya: User::where('id')->update(['auth_token' => ...])
+            // setiap login, yang bikin cache user tidak berguna dan
+            // middleware harus baca DB tiap request.
             $auth_token = md5(strtolower($data['username'] . '|' . $data['password']));
-            User::where('id', $user->id)->update([
-                'auth_token' => $auth_token,
-            ]);
 
             $request->session()->regenerate();
             session([
