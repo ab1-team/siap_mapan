@@ -123,26 +123,30 @@
             format: 'd/m/Y'
         });
 
-        $(document).on('change', '.input-nilai-akhir', function(e) {
-            e.preventDefault()
+        // Event listener saat nilai akhir pemakaian diubah
+        $(document).on('input change', '.input-nilai-akhir', function(e) {
+            e.preventDefault();
 
-            var id = $(this).attr('id').split('_')[1]
-            var nilai_akhir = $(this).val()
-            var nilai_awal = $('#awal_' + id).val()
+            // Mengambil nilai dari input awal dan akhir berdasarkan ID yang benar
+            var nilai_awal = parseFloat($('#awal').val()) || 0;
+            var nilai_akhir = parseFloat($(this).val()) || 0;
 
             if (nilai_akhir - nilai_awal < 0) {
                 Swal.fire({
                     title: 'Periksa kembali nilai yang dimasukkan',
                     text: 'Nilai Akhir tidak boleh lebih kecil dari Nilai Awal',
                     icon: 'warning',
-                })
+                });
 
-                $(this).val(nilai_awal)
+                $(this).val(nilai_awal);
+                $('#jumlah').val(0);
                 return;
             }
 
-            var jumlah = nilai_akhir - nilai_awal
-            $('#jumlah' + id).val(jumlah)
-        })
+            // Menghitung selisih dan memasukkannya ke input jumlah
+            var jumlah = nilai_akhir - nilai_awal;
+            $('#jumlah').val(jumlah);
+        });
     </script>
+@endsection
 @endsection
