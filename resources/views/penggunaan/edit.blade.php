@@ -123,29 +123,36 @@
             format: 'd/m/Y'
         });
 
-        // Event listener saat nilai akhir pemakaian diubah
-        $(document).on('input change', '.input-nilai-akhir', function(e) {
-            e.preventDefault();
-
-            // Mengambil nilai dari input awal dan akhir berdasarkan ID yang benar
+        // 1. Hitung otomatis jumlah secara real-time (tanpa menampilkan alert pop-up saat menghapus angka)
+        $(document).on('input', '.input-nilai-akhir', function(e) {
             var nilai_awal = parseFloat($('#awal').val()) || 0;
             var nilai_akhir = parseFloat($(this).val()) || 0;
 
-            if (nilai_akhir - nilai_awal < 0) {
+            // Jika nilai akhir kosong atau sedang dihapus, set jumlah ke 0 dulu tanpa alert
+            if ($(this).val() === '') {
+                $('#jumlah').val(0);
+                return;
+            }
+
+            var jumlah = nilai_akhir - nilai_awal;
+            // Jika hasilnya minus, tampilkan 0 dulu di jumlah (alert dipindah ke tombol simpan)
+            $('#jumlah').val(jumlah >= 0 ? jumlah : 0);
+        });
+
+        // 2. Validasi pencegahan dan alert baru muncul saat tombol Simpan diklik
+        $('#PutPemakaian').on('submit', function(e) {
+            var nilai_awal = parseFloat($('#awal').val()) || 0;
+            var nilai_akhir = parseFloat($('#akhir').val()) || 0;
+
+            if (nilai_akhir < nilai_awal) {
+                e.preventDefault(); // Batalkan submit form
                 Swal.fire({
                     title: 'Periksa kembali nilai yang dimasukkan',
                     text: 'Nilai Akhir tidak boleh lebih kecil dari Nilai Awal',
                     icon: 'warning',
                 });
-
-                $(this).val(nilai_awal);
-                $('#jumlah').val(0);
-                return;
+                return false;
             }
-
-            // Menghitung selisih dan memasukkannya ke input jumlah
-            var jumlah = nilai_akhir - nilai_awal;
-            $('#jumlah').val(jumlah);
         });
     </script>
 @endsection
