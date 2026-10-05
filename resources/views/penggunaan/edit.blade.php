@@ -149,4 +149,3 @@
         });
     </script>
 @endsection
-@endsection
